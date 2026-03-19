@@ -1,0 +1,47 @@
+server:
+  host: "127.0.0.1"
+  port: 8080
+
+dataset:
+  base_data_yaml: "./data/data.yaml"
+
+federated:
+  auto_partition: true
+  data_dir: "./federated_data"
+  min_fit_clients: 2
+  min_available_clients: 2
+
+model:
+  initial_weights: "./weights/yolov8n.pt"
+  global_out: "./artifacts/global_model.pt"
+
+train:
+  local_epochs: 1
+  imgsz: 640
+  batch: 8
+  device: "cuda:0"   # "cuda:0" nếu có GPU
+
+aggregation:
+  krum_byzantine: 1
+
+attack:
+  sign_flip_scale: 3.0
+
+defense:
+  enabled: true
+  cosine_z: 1.0
+  norm_z: 2.5
+  min_votes: 2
+
+runtime:
+  tmp_dir: "./tmp"
+  train_runs_dir: "./runs_fl"
+
+eval:
+  run_after_experiment: false
+  data_yaml: "./data/data.yaml"
+  poisoned_images: "./data/poisoned"
+  poisoned_class_id: 0
+  baseline_model: "./weights/baseline.pt"
+  attacked_model: "./weights/attacked.pt"
+  defended_model: "./weights/defended.pt"

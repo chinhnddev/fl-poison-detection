@@ -1,0 +1,49 @@
+server:
+  host: "127.0.0.1"
+  port: 8081
+
+dataset:
+  # Ultralytics built-in dataset (will auto-download on first use).
+  base_data_yaml: "coco128.yaml"
+
+federated:
+  auto_partition: false
+  data_dir: "./federated_data_smoke"
+  min_fit_clients: 2
+  min_available_clients: 2
+
+model:
+  # Ultralytics will auto-download if not present.
+  initial_weights: "yolov8n.pt"
+  global_out: "./artifacts_smoke/global_model.pt"
+
+train:
+  local_epochs: 1
+  imgsz: 320
+  batch: 2
+  device: "cpu"
+
+aggregation:
+  krum_byzantine: 0
+
+attack:
+  sign_flip_scale: 3.0
+
+defense:
+  enabled: false
+  cosine_z: 1.0
+  norm_z: 2.5
+  min_votes: 2
+
+runtime:
+  tmp_dir: "./tmp"
+  train_runs_dir: "./runs_fl_smoke"
+
+eval:
+  run_after_experiment: false
+  data_yaml: "coco128.yaml"
+  poisoned_images: ""
+  poisoned_class_id: 0
+  baseline_model: ""
+  attacked_model: ""
+  defended_model: ""

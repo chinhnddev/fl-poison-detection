@@ -1,0 +1,11 @@
+flwr>=1.8.0
+ultralytics>=8.2.0
+
+numpy>=1.23
+PyYAML>=6.0.1
+pillow>=9.4.0
+opencv-python-headless>=4.8.0.74
+
+matplotlib>=3.7.0
+tqdm>=4.66.0
+pycocotools>=2.0.7
