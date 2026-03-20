@@ -4,6 +4,8 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Tuple
+import os
+import shutil
 
 import numpy as np
 import yaml
@@ -48,6 +50,53 @@ def _infer_label_path(img: Path) -> Path:
             parts[i] = "labels"
             break
     return Path(*parts).with_suffix(".txt")
+
+
+def _copy_or_link(src: Path, dst: Path) -> None:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.exists():
+        return
+    try:
+        dst.symlink_to(src)
+    except Exception:
+        try:
+            os.link(src, dst)
+        except Exception:
+            shutil.copy2(src, dst)
+
+
+def _write_client_view(
+    client_dir: Path,
+    train_imgs: List[Path],
+    val_imgs: List[Path],
+) -> None:
+    """Create a per-client dataset view (images/labels) to avoid Ultralytics cache races.
+
+    Ultralytics writes label cache files next to the label directory. If multiple processes
+    point at the same underlying labels folder (e.g. Google Drive), they can race on *.cache.
+    Creating client-local label dirs makes cache files independent per client.
+    """
+    img_train_dir = client_dir / "images" / "train"
+    lbl_train_dir = client_dir / "labels" / "train"
+    img_val_dir = client_dir / "images" / "val"
+    lbl_val_dir = client_dir / "labels" / "val"
+    for d in [img_train_dir, lbl_train_dir, img_val_dir, lbl_val_dir]:
+        d.mkdir(parents=True, exist_ok=True)
+
+    def add_pair(img: Path, out_img_dir: Path, out_lbl_dir: Path) -> None:
+        dst_img = out_img_dir / img.name
+        _copy_or_link(img, dst_img)
+        src_lbl = _infer_label_path(img)
+        dst_lbl = out_lbl_dir / (dst_img.with_suffix(".txt").name)
+        if src_lbl.exists():
+            _copy_or_link(src_lbl, dst_lbl)
+        else:
+            dst_lbl.write_text("", encoding="utf-8")
+
+    for img in train_imgs:
+        add_pair(img, img_train_dir, lbl_train_dir)
+    for img in val_imgs:
+        add_pair(img, img_val_dir, lbl_val_dir)
 
 
 def _dominant_class(label_path: Path) -> int:
@@ -179,16 +228,20 @@ def write_federated_shards(
     out_root = Path(out_dir)
     out_root.mkdir(parents=True, exist_ok=True)
 
+    # Use the global val split for all clients, but materialize it under each client
+    # to avoid concurrent cache writes into a shared labels directory (Drive).
+    val_images = _list_images(Path(val_txt))
+
     # Stats
     stats = {}
     for cid, imgs in enumerate(shards):
         client_dir = out_root / f"client_{cid}"
         client_dir.mkdir(parents=True, exist_ok=True)
 
-        ctrain = client_dir / "train.txt"
-        ctrain.write_text("\n".join(str(p.resolve()) for p in imgs) + ("\n" if imgs else ""), encoding="utf-8")
+        # Build a client-local dataset view so Ultralytics writes cache into client_dir/labels/*.
+        _write_client_view(client_dir, train_imgs=imgs, val_imgs=val_images)
 
-        client_yaml = {"path": "", "train": str(ctrain.resolve()), "val": str(Path(val_txt).resolve())}
+        client_yaml = {"path": str(client_dir.resolve()), "train": "images/train", "val": "images/val"}
         if nc is not None:
             client_yaml["nc"] = nc
         if names is not None:
@@ -199,8 +252,8 @@ def write_federated_shards(
 
         # class stats
         cls_counter = Counter()
-        for img in imgs:
-            for line in _infer_label_path(img).read_text(encoding="utf-8").splitlines() if _infer_label_path(img).exists() else []:
+        for lbl in (client_dir / "labels" / "train").glob("*.txt"):
+            for line in lbl.read_text(encoding="utf-8").splitlines():
                 toks = line.strip().split()
                 if not toks:
                     continue
@@ -208,7 +261,7 @@ def write_federated_shards(
                     cls_counter[int(float(toks[0]))] += 1
                 except Exception:
                     pass
-        stats[f"client_{cid}"] = {"images": len(imgs), "objects_per_class": dict(cls_counter)}
+        stats[f"client_{cid}"] = {"images": len(imgs), "objects_per_class": dict(cls_counter), "val_images": len(val_images)}
 
     with open(out_root / "partition_stats.yaml", "w", encoding="utf-8") as f:
         yaml.safe_dump(stats, f, sort_keys=False)
