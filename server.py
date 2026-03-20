@@ -65,6 +65,13 @@ class CustomStrategy(fl.server.strategy.FedAvg):
 
         return ndarrays_to_parameters(agg), {"kept_clients": len(filtered), "removed_clients": len(dmeta["removed"])}
 
+    def configure_fit(self, server_round: int, parameters, client_manager):
+        pairs = super().configure_fit(server_round, parameters, client_manager)
+        # Propagate round number so client logs can show progress clearly.
+        for _, fit_ins in pairs:
+            fit_ins.config["server_round"] = int(server_round)
+        return pairs
+
 
 def main():
     ap = argparse.ArgumentParser()

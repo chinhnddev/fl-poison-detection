@@ -4,6 +4,7 @@ import random
 import subprocess
 import sys
 import time
+import os
 from pathlib import Path
 import socket
 import yaml
@@ -40,6 +41,16 @@ def _wait_for_server(host: str, port: int, timeout_s: float = 60.0) -> bool:
     return False
 
 
+def _tail_text(path: Path, max_lines: int = 120) -> str:
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception:
+        return ""
+    if len(lines) <= max_lines:
+        return "\n".join(lines)
+    return "\n".join(lines[-max_lines:])
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--num_clients", type=int, default=10)
@@ -48,6 +59,12 @@ def main():
     ap.add_argument("--rounds", type=int, default=5)
     ap.add_argument("--config", default="config.yaml")
     ap.add_argument("--log_dir", default="./logs", help="Write server/client logs here")
+    ap.add_argument(
+        "--server_ready_timeout_s",
+        type=float,
+        default=180.0,
+        help="Seconds to wait for server to start accepting connections (Colab can be slow)",
+    )
     args = ap.parse_args()
 
     cfg = yaml.safe_load(open(args.config, "r", encoding="utf-8"))
@@ -94,20 +111,40 @@ def main():
     bad = []
     server_log = None
     client_logs = []
+    server_log_path = log_dir / "server.log"
     try:
-        server_log = open(log_dir / "server.log", "w", encoding="utf-8")
-        server = subprocess.Popen(server_cmd, stdout=server_log, stderr=subprocess.STDOUT, text=True)
+        env = dict(os.environ)
+        env["PYTHONUNBUFFERED"] = "1"  # make subprocess logs appear in near-realtime
+
+        server_log = open(server_log_path, "w", encoding="utf-8", buffering=1)
+        server = subprocess.Popen(server_cmd, stdout=server_log, stderr=subprocess.STDOUT, text=True, env=env)
         # Server startup can take time (imports, weights load). Wait for the port to accept connections.
-        if not _wait_for_server(host, int(port), timeout_s=90.0):
+        # If the process exits early, fail fast and print the log tail for debugging.
+        deadline = time.time() + float(args.server_ready_timeout_s)
+        ready = False
+        while time.time() < deadline:
+            if server.poll() is not None:
+                server_log.flush()
+                tail = _tail_text(server_log_path)
+                msg = f"Server failed to start on {host}:{port} (exit={server.returncode})."
+                if tail:
+                    msg += "\n--- server.log (tail) ---\n" + tail
+                raise SystemExit(msg)
+            if _wait_for_server(host, int(port), timeout_s=2.0):
+                ready = True
+                break
+            time.sleep(0.5)
+        if not ready:
             server_log.flush()
-            raise SystemExit(f"Server did not become ready on {host}:{port} within timeout")
-        if server.poll() is not None:
-            server_log.flush()
-            raise SystemExit(f"Server failed to start on {host}:{port} (exit={server.returncode})")
+            tail = _tail_text(server_log_path)
+            msg = f"Server did not become ready on {host}:{port} within timeout ({args.server_ready_timeout_s}s)."
+            if tail:
+                msg += "\n--- server.log (tail) ---\n" + tail
+            raise SystemExit(msg)
 
         # 3) launch clients
         for cid in range(args.num_clients):
-            clog = open(log_dir / f"client_{cid}.log", "w", encoding="utf-8")
+            clog = open(log_dir / f"client_{cid}.log", "w", encoding="utf-8", buffering=1)
             client_logs.append(clog)
             c = subprocess.Popen([
                 sys.executable, "client.py",
@@ -115,7 +152,7 @@ def main():
                 "--server_address", f"{host}:{port}",
                 "--config", args.config,
                 "--malicious", "1" if cid in malicious else "0",
-            ], stdout=clog, stderr=subprocess.STDOUT, text=True)
+            ], stdout=clog, stderr=subprocess.STDOUT, text=True, env=env)
             clients.append(c)
 
         # 5) wait rounds finish

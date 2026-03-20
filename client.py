@@ -1,4 +1,6 @@
 import argparse
+import logging
+import time
 from pathlib import Path
 import yaml
 import flwr as fl
@@ -51,10 +53,23 @@ class YoloClient(fl.client.NumPyClient):
         )
         self.base_model = cfg["model"]["initial_weights"]
 
+        logging.getLogger("client").info(
+            "cid=%s malicious=%s shard=%s local_epochs=%s imgsz=%s batch=%s device=%s",
+            self.cid,
+            int(self.malicious),
+            self.data_yaml,
+            self.cfg["train"]["local_epochs"],
+            self.cfg["train"]["imgsz"],
+            self.cfg["train"]["batch"],
+            self.cfg["train"]["device"],
+        )
+
     def get_parameters(self, config):
         return get_parameters(self.base_model)
 
     def fit(self, parameters, config):
+        logger = logging.getLogger("client")
+        server_round = int(config.get("server_round", -1))
         global_params = parameters
         tmp_model = Path(self.cfg["runtime"]["tmp_dir"]) / f"client_{self.cid}_round_model.pt"
         tmp_model.parent.mkdir(parents=True, exist_ok=True)
@@ -62,6 +77,8 @@ class YoloClient(fl.client.NumPyClient):
         # load global parameters into local model
         set_parameters_to_model(self.base_model, parameters, str(tmp_model))
 
+        t0 = time.time()
+        logger.info("FIT_START cid=%s round=%s malicious=%s", self.cid, server_round, int(self.malicious))
         params, n, metrics = train_local(
             model_path=str(tmp_model),
             data_yaml=self.data_yaml,
@@ -72,6 +89,7 @@ class YoloClient(fl.client.NumPyClient):
             project=self.cfg["runtime"]["train_runs_dir"],
             name=f"client_{self.cid}",
         )
+        logger.info("FIT_END cid=%s round=%s seconds=%.2f num_examples=%s", self.cid, server_round, time.time() - t0, n)
 
         # Model poisoning (malicious clients only) in update space.
         if self.malicious and self.model_poison_cfg.enabled:
@@ -94,6 +112,7 @@ def main():
     ap.add_argument("--malicious", type=int, default=0)
     args = ap.parse_args()
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s", force=True)
     cfg = yaml.safe_load(open(args.config, "r", encoding="utf-8"))
     client = YoloClient(args.cid, cfg, bool(args.malicious))
     fl.client.start_numpy_client(server_address=args.server_address, client=client)
