@@ -95,7 +95,10 @@ def _apply_trigger(in_img: Path, out_img: Path, cfg: BackdoorConfig) -> None:
 def _process_label_file(
     in_path: Path,
     out_path: Path,
-    image_poisoned: bool,
+    do_label_flip: bool,
+    do_bbox: bool,
+    do_removal: bool,
+    do_backdoor: bool,
     rng_flip: random.Random,
     rng_bbox: random.Random,
     rng_rm: random.Random,
@@ -133,23 +136,23 @@ def _process_label_file(
         except Exception:
             continue
 
-        # Apply object removal (only on poisoned images)
-        if image_poisoned and removal.enabled and cls == int(removal.target_class_id) and rng_rm.random() < float(removal.prob):
+        # Apply object removal
+        if do_removal and removal.enabled and cls == int(removal.target_class_id) and rng_rm.random() < float(removal.prob):
             removed += 1
             continue
 
         # Backdoor conditional flip (only if trigger applied on this image)
-        if image_poisoned and backdoor.enabled and cls == int(backdoor.src_class_id) and rng_bd.random() < float(backdoor.prob):
+        if do_backdoor and backdoor.enabled and cls == int(backdoor.src_class_id) and rng_bd.random() < float(backdoor.prob):
             cls = int(backdoor.target_class_id)
             backdoor_flipped += 1
 
-        # Label flip (only on poisoned images)
-        if image_poisoned and label_flip.enabled and cls == int(label_flip.src_class_id) and rng_flip.random() < float(label_flip.prob):
+        # Label flip
+        if do_label_flip and label_flip.enabled and cls == int(label_flip.src_class_id) and rng_flip.random() < float(label_flip.prob):
             cls = int(label_flip.dst_class_id)
             flipped += 1
 
-        # BBox distortion (only on poisoned images)
-        if image_poisoned and bbox.enabled and rng_bbox.random() < float(bbox.prob):
+        # BBox distortion
+        if do_bbox and bbox.enabled and rng_bbox.random() < float(bbox.prob):
             x += rng_bbox.uniform(-float(bbox.shift_xy), float(bbox.shift_xy))
             y += rng_bbox.uniform(-float(bbox.shift_xy), float(bbox.shift_xy))
             w *= (1.0 + rng_bbox.uniform(-float(bbox.shift_wh), float(bbox.shift_wh)))
@@ -224,12 +227,14 @@ def build_poisoned_dataset(
 
     train_txt = out_root_p / "train.txt"
     total = {"lines_in": 0, "lines_out": 0, "flipped": 0, "removed": 0, "distorted": 0, "backdoor_flipped": 0}
-    poisoned_images = 0
+    poisoned_images_any = 0
+    poisoned_images_label_flip = 0
+    poisoned_images_bbox = 0
+    poisoned_images_removal = 0
     poisoned_images_backdoor = 0
 
     with open(train_txt, "w", encoding="utf-8") as f:
-        for img, do_flip, do_bbox, do_rm, do_bd in zip(images, mask_flip, mask_bbox, mask_rm, mask_bd):
-            is_poisoned = bool(do_flip or do_bbox or do_rm or do_bd)
+        for img, do_flip, do_bb, do_rm, do_bd in zip(images, mask_flip, mask_bbox, mask_rm, mask_bd):
             dst_img = out_images / img.name
             if do_bd and backdoor.enabled:
                 _apply_trigger(img, dst_img, backdoor)
@@ -242,7 +247,10 @@ def build_poisoned_dataset(
             stats = _process_label_file(
                 src_lbl,
                 dst_lbl,
-                image_poisoned=bool(is_poisoned),
+                do_label_flip=bool(do_flip),
+                do_bbox=bool(do_bb),
+                do_removal=bool(do_rm),
+                do_backdoor=bool(do_bd),
                 rng_flip=rng_flip,
                 rng_bbox=rng_bbox,
                 rng_rm=rng_rm,
@@ -254,7 +262,10 @@ def build_poisoned_dataset(
             )
             for k in total:
                 total[k] += int(stats.get(k, 0))
-            poisoned_images += int(bool(is_poisoned))
+            poisoned_images_any += int(bool(do_flip or do_bb or do_rm or do_bd))
+            poisoned_images_label_flip += int(bool(do_flip))
+            poisoned_images_bbox += int(bool(do_bb))
+            poisoned_images_removal += int(bool(do_rm))
 
             f.write(str(dst_img.resolve()) + "\n")
 
@@ -271,7 +282,10 @@ def build_poisoned_dataset(
     meta = {
         "attack": "dataset_poison",
         "train_images": int(len(images)),
-        "poisoned_images": int(poisoned_images),
+        "poisoned_images_any": int(poisoned_images_any),
+        "poisoned_images_label_flip": int(poisoned_images_label_flip),
+        "poisoned_images_bbox": int(poisoned_images_bbox),
+        "poisoned_images_removal": int(poisoned_images_removal),
         "poisoned_images_backdoor": int(poisoned_images_backdoor),
         "label_flip": vars(label_flip),
         "bbox_distortion": vars(bbox),

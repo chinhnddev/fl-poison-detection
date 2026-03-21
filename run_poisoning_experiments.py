@@ -28,6 +28,10 @@ def _evaluate(
     data_yaml: str,
     asr_src_class_id: int,
     asr_target_class_id: int,
+    asr_trigger: bool,
+    trigger_size: int,
+    trigger_value: int,
+    trigger_position: str,
     baseline: str,
     attacked: str,
     defended: str,
@@ -51,6 +55,11 @@ def _evaluate(
         str(imgsz),
     ]
     cmd += ["--asr_src_class_id", str(asr_src_class_id), "--asr_target_class_id", str(asr_target_class_id)]
+    if asr_trigger:
+        cmd.append("--asr_trigger")
+        cmd += ["--trigger_size", str(int(trigger_size))]
+        cmd += ["--trigger_value", str(int(trigger_value))]
+        cmd += ["--trigger_position", str(trigger_position)]
     _run(cmd, repo)
 
 
@@ -71,9 +80,27 @@ def main() -> None:
     repo = Path(__file__).resolve().parent
     cfg_attack = yaml.safe_load(open(repo / args.attack_config, "r", encoding="utf-8"))
     data_yaml = str(cfg_attack["dataset"]["base_data_yaml"])
-    lf = ((cfg_attack.get("attack") or {}).get("label_flip")) or {}
-    src_id = int(lf.get("src_class_id", 0))
-    dst_id = int(lf.get("dst_class_id", 56))
+    attack_cfg = cfg_attack.get("attack") or {}
+    lf = (attack_cfg.get("label_flip")) or {}
+    bd = (attack_cfg.get("backdoor")) or {}
+
+    # ASR semantics:
+    # - Backdoor: evaluate on triggered val images (asr_trigger=True), use backdoor src/target.
+    # - Label-flip: evaluate on clean val images (asr_trigger=False), use label_flip src/dst.
+    if bool(bd.get("enabled", False)):
+        src_id = int(bd.get("src_class_id", bd.get("src_class", 0)))
+        dst_id = int(bd.get("target_class_id", bd.get("target_class", 56)))
+        asr_trigger = True
+        trigger_size = int(bd.get("trigger_size", 16))
+        trigger_value = int(bd.get("trigger_value", 255))
+        trigger_position = str(bd.get("position", "bottom_right"))
+    else:
+        src_id = int(lf.get("src_class_id", 0))
+        dst_id = int(lf.get("dst_class_id", 56))
+        asr_trigger = False
+        trigger_size = 16
+        trigger_value = 255
+        trigger_position = "bottom_right"
 
     out_dir = repo / "artifacts"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -88,7 +115,7 @@ def main() -> None:
     cfg_baseline["defense"] = dict(cfg_baseline.get("defense") or {})
     cfg_baseline["defense"]["enabled"] = False
     cfg_baseline["attack"] = dict(cfg_baseline.get("attack") or {})
-    for k in ["label_flip", "bbox_distortion", "object_removal", "model_poison"]:
+    for k in ["label_flip", "bbox_distortion", "object_removal", "backdoor", "model_poison"]:
         cfg_baseline["attack"][k] = dict((cfg_baseline["attack"].get(k) or {}))
         cfg_baseline["attack"][k]["enabled"] = False
     cfg_baseline["model"] = dict(cfg_baseline.get("model") or {})
@@ -192,6 +219,10 @@ def main() -> None:
         data_yaml=str((repo / data_yaml).resolve()),
         asr_src_class_id=src_id,
         asr_target_class_id=dst_id,
+        asr_trigger=bool(asr_trigger),
+        trigger_size=int(trigger_size),
+        trigger_value=int(trigger_value),
+        trigger_position=str(trigger_position),
         baseline=baseline_model,
         attacked=str((out_dir / "attack.pt").resolve()),
         defended=str((out_dir / "defended.pt").resolve()),

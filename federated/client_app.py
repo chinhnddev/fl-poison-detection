@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import time
+import hashlib
+import json
 from pathlib import Path
 from typing import Dict, List
 
@@ -110,7 +112,16 @@ class YoloDeltaClient(fl.client.NumPyClient):
             ]
         )
         if self.malicious and data_poison_enabled:
-            out_dir = Path(cfg["runtime"]["tmp_dir"]) / "poison" / f"client_{self.cid}"
+            # IMPORTANT: poison artifacts must be tied to the exact attack config.
+            # Otherwise changing YAML would silently reuse stale poisoned shards.
+            sig_obj = {
+                "label_flip": vars(self.label_flip),
+                "bbox_distortion": vars(self.bbox),
+                "object_removal": vars(self.removal),
+                "backdoor": vars(self.backdoor),
+            }
+            sig = hashlib.md5(json.dumps(sig_obj, sort_keys=True).encode("utf-8")).hexdigest()[:10]
+            out_dir = Path(cfg["runtime"]["tmp_dir"]) / "poison" / f"client_{self.cid}_{sig}"
             out_yaml = out_dir / "data.yaml"
             if not out_yaml.exists():
                 self.data_yaml = build_poisoned_dataset(

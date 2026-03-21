@@ -104,8 +104,19 @@ def main():
         ]
         subprocess.run(cmd, check=True)
 
+    def _any_attack_enabled(c: dict) -> bool:
+        a = c.get("attack") or {}
+        for key in ["label_flip", "bbox_distortion", "object_removal", "backdoor", "model_poison"]:
+            if bool((a.get(key) or {}).get("enabled", False)):
+                return True
+        return False
+
     # 4) malicious assignment
-    k = math.floor(args.num_clients * args.malicious_ratio)
+    # Baseline runs should not sample "malicious" clients at all (keeps logs/results unambiguous).
+    if not _any_attack_enabled(cfg):
+        k = 0
+    else:
+        k = math.floor(args.num_clients * args.malicious_ratio)
 
     def _choose_malicious_topk_src_class() -> set[int]:
         stats_path = Path(cfg["federated"]["data_dir"]) / "partition_stats.yaml"
