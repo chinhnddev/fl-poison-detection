@@ -35,8 +35,8 @@ attack:
     prob: 1.0
     seed: 42
   model_poison:
-    enabled: false
-    strength: 3.0
+    enabled: true
+    strength: 5.0
     mode: "signflip"
 
 defense:
