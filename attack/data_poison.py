@@ -204,6 +204,44 @@ def build_poisoned_dataset(
     out_images.mkdir(parents=True, exist_ok=True)
     out_labels.mkdir(parents=True, exist_ok=True)
 
+    def _classes_present(label_path: Path) -> set[int]:
+        if not label_path.exists():
+            return set()
+        out: set[int] = set()
+        for line in label_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            toks = line.split()
+            if not toks:
+                continue
+            try:
+                out.add(int(float(toks[0])))
+            except Exception:
+                continue
+        return out
+
+    present = [_classes_present(_infer_label_path(img)) for img in images]
+
+    def _pick_mask(r: random.Random, candidates: List[int], ratio: float) -> List[bool]:
+        """Pick a deterministic subset of candidates (exact-k) for poisoning.
+
+        ratio is interpreted over candidate set size (not total images).
+        """
+        mask = [False] * len(images)
+        if not candidates:
+            return mask
+        rr = max(0.0, min(1.0, float(ratio)))
+        k = int(round(rr * len(candidates)))
+        if rr > 0.0 and k == 0:
+            k = 1
+        k = min(k, len(candidates))
+        cand = list(candidates)
+        r.shuffle(cand)
+        for idx in cand[:k]:
+            mask[idx] = True
+        return mask
+
     # Determine which images are poisoned per attack type (deterministic w.r.t seed and image order).
     rng_flip_mask = random.Random(int(label_flip.seed))
     rng_bbox_mask = random.Random(int(bbox.seed))
@@ -216,14 +254,17 @@ def build_poisoned_dataset(
     rng_rm = random.Random(int(removal.seed) + 100000)
     rng_bd = random.Random(int(backdoor.seed) + 100000)
 
-    def _mask(r: random.Random, ratio: float) -> List[bool]:
-        rr = max(0.0, min(1.0, float(ratio)))
-        return [r.random() < rr for _ in images]
+    # Conditional masks:
+    # - label_flip/backdoor only make sense on images containing src_class_id
+    # - object_removal only makes sense on images containing target_class_id
+    cand_flip = [i for i, s in enumerate(present) if int(label_flip.src_class_id) in s] if label_flip.enabled else []
+    cand_bd = [i for i, s in enumerate(present) if int(backdoor.src_class_id) in s] if backdoor.enabled else []
+    cand_rm = [i for i, s in enumerate(present) if int(removal.target_class_id) in s] if removal.enabled else []
 
-    mask_flip = _mask(rng_flip_mask, float(label_flip.poison_ratio)) if label_flip.enabled else [False] * len(images)
-    mask_bbox = _mask(rng_bbox_mask, float(bbox.poison_ratio)) if bbox.enabled else [False] * len(images)
-    mask_rm = _mask(rng_rm_mask, float(removal.poison_ratio)) if removal.enabled else [False] * len(images)
-    mask_bd = _mask(rng_bd_mask, float(backdoor.poison_ratio)) if backdoor.enabled else [False] * len(images)
+    mask_flip = _pick_mask(rng_flip_mask, cand_flip, float(label_flip.poison_ratio)) if label_flip.enabled else [False] * len(images)
+    mask_bbox = [rng_bbox_mask.random() < max(0.0, min(1.0, float(bbox.poison_ratio))) for _ in images] if bbox.enabled else [False] * len(images)
+    mask_rm = _pick_mask(rng_rm_mask, cand_rm, float(removal.poison_ratio)) if removal.enabled else [False] * len(images)
+    mask_bd = _pick_mask(rng_bd_mask, cand_bd, float(backdoor.poison_ratio)) if backdoor.enabled else [False] * len(images)
 
     train_txt = out_root_p / "train.txt"
     total = {"lines_in": 0, "lines_out": 0, "flipped": 0, "removed": 0, "distorted": 0, "backdoor_flipped": 0}
@@ -282,6 +323,9 @@ def build_poisoned_dataset(
     meta = {
         "attack": "dataset_poison",
         "train_images": int(len(images)),
+        "candidates_label_flip": int(len(cand_flip)),
+        "candidates_object_removal": int(len(cand_rm)),
+        "candidates_backdoor": int(len(cand_bd)),
         "poisoned_images_any": int(poisoned_images_any),
         "poisoned_images_label_flip": int(poisoned_images_label_flip),
         "poisoned_images_bbox": int(poisoned_images_bbox),
