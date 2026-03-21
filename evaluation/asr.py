@@ -52,7 +52,10 @@ def _list_images(ref: Path) -> List[Path]:
         for line in ref.read_text(encoding="utf-8", errors="replace").splitlines():
             line = line.strip()
             if line:
-                out.append(Path(line))
+                p = Path(line)
+                if not p.is_absolute():
+                    p = (ref.parent / p).resolve()
+                out.append(p)
         return out
     if ref.exists() and ref.is_dir():
         return [x for x in ref.rglob("*") if x.suffix.lower() in exts]

@@ -37,7 +37,12 @@ def _list_images(ref: Path) -> List[Path]:
         for line in ref.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if line:
-                out.append(Path(line))
+                p = Path(line)
+                # Make filelists portable across machines by resolving relative paths
+                # relative to the filelist location.
+                if not p.is_absolute():
+                    p = (ref.parent / p).resolve()
+                out.append(p)
         return out
     if ref.exists() and ref.is_dir():
         return [x for x in ref.rglob("*") if x.suffix.lower() in exts]
@@ -151,7 +156,14 @@ def split_train_val(
     cfg: Dict = yaml.safe_load(open(yp, "r", encoding="utf-8"))
     train_ref = cfg["train"]
     try:
-        all_imgs = _list_images(_resolve_ref(cfg, str(train_ref), yp))
+        train_ref_p = _resolve_ref(cfg, str(train_ref), yp)
+        all_imgs = _list_images(train_ref_p)
+        # If train is a filelist but paths are invalid on this machine (e.g. Windows paths on Colab),
+        # fall back to source_train to regenerate portable splits.
+        if str(train_ref).lower().endswith(".txt"):
+            missing = sum(1 for p in all_imgs if not p.exists())
+            if missing > 0:
+                raise FileNotFoundError(f"train filelist contains {missing} missing paths, falling back to source_train")
     except FileNotFoundError:
         # Support datasets where train/val are generated filelists (train.txt/val.txt).
         src = cfg.get("source_train", "")
@@ -170,8 +182,21 @@ def split_train_val(
     vpath = Path(val_txt)
     tpath.parent.mkdir(parents=True, exist_ok=True)
     vpath.parent.mkdir(parents=True, exist_ok=True)
-    tpath.write_text("\n".join(str(p) for p in train_imgs) + "\n", encoding="utf-8")
-    vpath.write_text("\n".join(str(p) for p in val_imgs) + "\n", encoding="utf-8")
+    # Write filelists as paths relative to the dataset root (portable across machines).
+    root = None
+    try:
+        root = _resolve_ref(cfg, str(cfg.get("path", ".")), yp).resolve()
+    except Exception:
+        root = yp.parent.resolve()
+
+    def _rel(p: Path) -> str:
+        try:
+            return p.resolve().relative_to(root).as_posix()
+        except Exception:
+            return str(p.resolve())
+
+    tpath.write_text("\n".join(_rel(p) for p in train_imgs) + "\n", encoding="utf-8")
+    vpath.write_text("\n".join(_rel(p) for p in val_imgs) + "\n", encoding="utf-8")
     return str(tpath.resolve()), str(vpath.resolve())
 
 
