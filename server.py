@@ -25,6 +25,7 @@ class CustomStrategy(fl.server.strategy.FedAvg):
         self.aggregation = aggregation
         self.base_model = cfg["model"]["initial_weights"]
         self.out_model = cfg["model"]["global_out"]
+        self._round_global: Optional[List[np.ndarray]] = None  # ndarrays of global params for current round
 
     def aggregate_fit(
         self,
@@ -35,14 +36,14 @@ class CustomStrategy(fl.server.strategy.FedAvg):
         if not results:
             return None, {}
 
-        updates = []
+        updates_params = []
         for cp, fr in results:
             nds = parameters_to_ndarrays(fr.parameters)
             logger.info(
                 "round=%s client=%s num_examples=%s metrics=%s",
                 server_round, cp.cid, fr.num_examples, dict(fr.metrics)
             )
-            updates.append((cp.cid, nds, fr.num_examples))
+            updates_params.append((cp.cid, nds, fr.num_examples))
 
         dcfg = DefenseConfig(
             enabled=self.cfg["defense"]["enabled"],
@@ -50,8 +51,22 @@ class CustomStrategy(fl.server.strategy.FedAvg):
             norm_z=self.cfg["defense"]["norm_z"],
             min_votes=self.cfg["defense"]["min_votes"],
         )
-        filtered, dmeta = filter_suspicious(updates, dcfg)
-        logger.info("round=%s defense removed clients=%s", server_round, dmeta["removed"])
+
+        # Defense should operate on *updates* (deltas), not absolute parameters.
+        # Using absolute weights can hide poisoning (all clients are close to global).
+        if self._round_global is not None:
+            g = self._round_global
+            updates_delta = []
+            for cid, nds, n in updates_params:
+                delta = [(np.asarray(w, dtype=np.float64) - np.asarray(gg, dtype=np.float64)) for w, gg in zip(nds, g)]
+                updates_delta.append((cid, delta, n))
+            kept_delta, dmeta = filter_suspicious(updates_delta, dcfg)
+            kept_cids = {cid for cid, _, _ in kept_delta}
+            filtered = [u for u in updates_params if u[0] in kept_cids]
+        else:
+            # Fallback (shouldn't happen): filter on params.
+            filtered, dmeta = filter_suspicious(updates_params, dcfg)
+        logger.info("round=%s defense removed clients=%s votes=%s", server_round, dmeta.get("removed"), dmeta.get("votes"))
 
         if self.aggregation == "krum":
             agg = krum(filtered, byzantine_count=self.cfg["aggregation"]["krum_byzantine"])
@@ -66,6 +81,11 @@ class CustomStrategy(fl.server.strategy.FedAvg):
         return ndarrays_to_parameters(agg), {"kept_clients": len(filtered), "removed_clients": len(dmeta["removed"])}
 
     def configure_fit(self, server_round: int, parameters, client_manager):
+        # Save current global parameters so aggregate_fit can compute deltas for defense.
+        try:
+            self._round_global = parameters_to_ndarrays(parameters)
+        except Exception:
+            self._round_global = None
         pairs = super().configure_fit(server_round, parameters, client_manager)
         # Propagate round number so client logs can show progress clearly.
         for _, fit_ins in pairs:
