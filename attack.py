@@ -135,6 +135,9 @@ def build_poisoned_shard_label_flip(
     shard_yaml_path = Path(shard_data_yaml)
     shard_cfg: Dict = yaml.safe_load(open(shard_yaml_path, "r", encoding="utf-8"))
     val_ref = shard_cfg.get("val", "")
+    # Keep the original shard base path so relative `val` stays valid (e.g. "images/val").
+    # Otherwise Ultralytics will error even if we train with val=False.
+    base_path = shard_cfg.get("path", "") or str(shard_yaml_path.parent.resolve())
     nc = shard_cfg.get("nc", None)
     names = shard_cfg.get("names", None)
 
@@ -162,7 +165,7 @@ def build_poisoned_shard_label_flip(
             f.write(str(dst_img.resolve()) + "\n")
 
     out_yaml = {
-        "path": "",
+        "path": str(base_path),
         "train": str(train_txt.resolve()),
         "val": val_ref,
     }
@@ -223,4 +226,3 @@ def poison_model_update(
         poisoned = ga.astype(np.float32, copy=False) + pd
         out.append(np.asarray(poisoned.astype(ta.dtype, copy=False)))
     return out
-
