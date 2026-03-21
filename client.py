@@ -38,12 +38,28 @@ class YoloClient(fl.client.NumPyClient):
             seed=int(lf.get("seed", seed)) + int(cid),
         )
         if self.malicious and lf_cfg.enabled:
+            logger = logging.getLogger("client")
             out_dir = Path(cfg["runtime"]["tmp_dir"]) / "poison" / f"client_{cid}_label_flip"
             out_yaml = out_dir / "data.yaml"
             if not out_yaml.exists():
                 self.data_yaml = build_poisoned_shard_label_flip(self.data_yaml, str(out_dir), lf_cfg)
             else:
                 self.data_yaml = str(out_yaml.resolve())
+            meta_p = out_dir / "poison_meta.yaml"
+            if meta_p.exists():
+                try:
+                    meta = yaml.safe_load(open(meta_p, "r", encoding="utf-8")) or {}
+                    logger.info(
+                        "poison_ready cid=%s attack=label_flip train_images=%s label_lines_flipped=%s src=%s dst=%s prob=%s",
+                        self.cid,
+                        meta.get("train_images", "?"),
+                        meta.get("label_lines_flipped", "?"),
+                        meta.get("src_class_id", "?"),
+                        meta.get("dst_class_id", "?"),
+                        meta.get("prob", "?"),
+                    )
+                except Exception as e:
+                    logger.warning("poison_meta_read_failed cid=%s err=%s", self.cid, e)
 
         mp = (a.get("model_poison") or {})
         self.model_poison_cfg = ModelPoisonConfig(
