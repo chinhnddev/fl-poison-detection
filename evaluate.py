@@ -268,7 +268,8 @@ def main() -> None:
     ap.add_argument("--defended", default="", help="Model with defense path")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--imgsz", type=int, default=320)
-    ap.add_argument("--conf", type=float, default=0.25)
+    # Use a low conf threshold so ASR doesn't get artificially zeroed by confidence filtering.
+    ap.add_argument("--conf", type=float, default=0.001)
     ap.add_argument("--asr_src_class_id", type=int, default=-1, help="Source class id (e.g., person=0)")
     ap.add_argument("--asr_target_class_id", type=int, default=-1, help="Target class id (e.g., dog=16)")
     ap.add_argument("--asr_iou", type=float, default=0.5, help="IoU threshold for ASR matching")

@@ -55,6 +55,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--num_clients", type=int, default=10)
     ap.add_argument("--malicious_ratio", type=float, default=0.4)
+    ap.add_argument(
+        "--malicious_selection",
+        choices=["random", "topk_src_class"],
+        default="random",
+        help="How to choose malicious clients. topk_src_class uses partition_stats.yaml and attack.label_flip.src_class_id.",
+    )
     ap.add_argument("--aggregation", choices=["fedavg", "krum"], default="fedavg")
     ap.add_argument("--rounds", type=int, default=5)
     ap.add_argument("--config", default="config.yaml")
@@ -95,7 +101,55 @@ def main():
 
     # 4) malicious assignment
     k = math.floor(args.num_clients * args.malicious_ratio)
-    malicious = set(random.sample(range(args.num_clients), k)) if k > 0 else set()
+
+    def _choose_malicious_topk_src_class() -> set[int]:
+        stats_path = Path(cfg["federated"]["data_dir"]) / "partition_stats.yaml"
+        if not stats_path.exists():
+            return set(random.sample(range(args.num_clients), k)) if k > 0 else set()
+        stats = yaml.safe_load(open(stats_path, "r", encoding="utf-8")) or {}
+        # Determine src class from config.
+        src = int((((cfg.get("attack") or {}).get("label_flip") or {}).get("src_class_id")) or 0)
+        scored = []
+        for cid in range(args.num_clients):
+            key = f"client_{cid}"
+            entry = stats.get(key, {}) or {}
+            opc = entry.get("objects_per_class", {}) or {}
+            # YAML may load keys as int or str depending on how it was written.
+            count = int(opc.get(src, opc.get(str(src), 0)) or 0)
+            scored.append((count, cid))
+        scored.sort(reverse=True)
+        # If all counts are zero, fall back to random selection.
+        if not scored or scored[0][0] == 0:
+            return set(random.sample(range(args.num_clients), k)) if k > 0 else set()
+        return set(cid for _, cid in scored[:k])
+
+    # Config may override CLI selection.
+    cfg_sel = str(((cfg.get("attack") or {}).get("malicious_selection")) or "").strip().lower()
+    sel = args.malicious_selection
+    if cfg_sel in {"random", "topk_src_class", "topk_src_class_id", "topk_src"}:
+        sel = "topk_src_class" if cfg_sel.startswith("topk") else "random"
+
+    if k > 0:
+        if sel == "topk_src_class":
+            malicious = _choose_malicious_topk_src_class()
+        else:
+            malicious = set(random.sample(range(args.num_clients), k))
+    else:
+        malicious = set()
+
+    # Persist run metadata for paper-style bookkeeping.
+    meta = {
+        "seed": seed,
+        "num_clients": int(args.num_clients),
+        "malicious_ratio": float(args.malicious_ratio),
+        "malicious_selection": str(sel),
+        "malicious_cids": sorted(list(malicious)),
+        "rounds": int(args.rounds),
+        "aggregation": str(args.aggregation),
+        "config": str(args.config),
+    }
+    with open(log_dir / "run_meta.yaml", "w", encoding="utf-8") as f:
+        yaml.safe_dump(meta, f, sort_keys=False)
 
     # 2) launch server
     server_cmd = [

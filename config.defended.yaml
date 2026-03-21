@@ -29,6 +29,7 @@ aggregation:
   krum_byzantine: 1
 
 attack:
+  malicious_selection: "topk_src_class"
   label_flip:
     enabled: true
     # COCO class ids (Ultralytics): person=0, dog=16
@@ -37,8 +38,8 @@ attack:
     prob: 1.0
     seed: 42
   model_poison:
-    enabled: true
-    strength: 5.0
+    enabled: false
+    strength: 2.0
     mode: "signflip"
 
 defense:
