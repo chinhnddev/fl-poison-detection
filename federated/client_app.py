@@ -140,11 +140,14 @@ class YoloDeltaClient(fl.client.NumPyClient):
                 try:
                     meta = yaml.safe_load(open(meta_p, "r", encoding="utf-8")) or {}
                     logging.getLogger("client").info(
-                        "poison_ready cid=%s poisoned_images=%s flipped=%s backdoor_flipped=%s",
+                        "poison_ready cid=%s candidates_backdoor=%s poisoned_images_backdoor=%s backdoor_flipped=%s poisoned_images_label_flip=%s flipped=%s poisoned_images_any=%s",
                         self.cid,
-                        meta.get("poisoned_images", "?"),
-                        meta.get("flipped", "?"),
+                        meta.get("candidates_backdoor", meta.get("candidates_bd", "?")),
+                        meta.get("poisoned_images_backdoor", "?"),
                         meta.get("backdoor_flipped", "?"),
+                        meta.get("poisoned_images_label_flip", "?"),
+                        meta.get("flipped", "?"),
+                        meta.get("poisoned_images_any", "?"),
                     )
                 except Exception:
                     pass
