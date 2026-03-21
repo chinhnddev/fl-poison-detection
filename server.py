@@ -1,137 +1,29 @@
 import argparse
-import logging
-import random
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
-import flwr as fl
-import numpy as np
-import yaml
-from flwr.common import FitRes, Parameters, Scalar, ndarrays_to_parameters, parameters_to_ndarrays
-from flwr.server.client_proxy import ClientProxy
-
-from aggregation import weighted_fedavg, krum
-from defense import DefenseConfig, filter_suspicious
-from train_yolo import get_parameters, set_parameters_to_model
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
-logger = logging.getLogger("server")
+from federated.server_app import run_server
 
 
-class CustomStrategy(fl.server.strategy.FedAvg):
-    def __init__(self, cfg: dict, aggregation: str, **kwargs):
-        super().__init__(**kwargs)
-        self.cfg = cfg
-        self.aggregation = aggregation
-        self.base_model = cfg["model"]["initial_weights"]
-        self.out_model = cfg["model"]["global_out"]
-        self._round_global: Optional[List[np.ndarray]] = None  # ndarrays of global params for current round
-
-    def aggregate_fit(
-        self,
-        server_round: int,
-        results: List[Tuple[ClientProxy, FitRes]],
-        failures,
-    ) -> Tuple[Optional[Parameters], Dict[str, Scalar]]:
-        if not results:
-            return None, {}
-
-        updates_params = []
-        for cp, fr in results:
-            nds = parameters_to_ndarrays(fr.parameters)
-            logger.info(
-                "round=%s client=%s num_examples=%s metrics=%s",
-                server_round, cp.cid, fr.num_examples, dict(fr.metrics)
-            )
-            updates_params.append((cp.cid, nds, fr.num_examples))
-
-        dcfg = DefenseConfig(
-            enabled=self.cfg["defense"]["enabled"],
-            cosine_z=self.cfg["defense"]["cosine_z"],
-            norm_z=self.cfg["defense"]["norm_z"],
-            min_votes=self.cfg["defense"]["min_votes"],
-        )
-
-        # Defense should operate on *updates* (deltas), not absolute parameters.
-        # Using absolute weights can hide poisoning (all clients are close to global).
-        if self._round_global is not None:
-            g = self._round_global
-            updates_delta = []
-            for cid, nds, n in updates_params:
-                delta = [(np.asarray(w, dtype=np.float64) - np.asarray(gg, dtype=np.float64)) for w, gg in zip(nds, g)]
-                updates_delta.append((cid, delta, n))
-            kept_delta, dmeta = filter_suspicious(updates_delta, dcfg)
-            kept_cids = {cid for cid, _, _ in kept_delta}
-            filtered = [u for u in updates_params if u[0] in kept_cids]
-        else:
-            # Fallback (shouldn't happen): filter on params.
-            filtered, dmeta = filter_suspicious(updates_params, dcfg)
-        logger.info("round=%s defense removed clients=%s votes=%s", server_round, dmeta.get("removed"), dmeta.get("votes"))
-
-        if self.aggregation == "krum":
-            agg = krum(filtered, byzantine_count=self.cfg["aggregation"]["krum_byzantine"])
-        else:
-            agg = weighted_fedavg(filtered)
-
-        # save current global model
-        out = Path(self.out_model)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        set_parameters_to_model(self.base_model, agg, str(out))
-
-        return ndarrays_to_parameters(agg), {"kept_clients": len(filtered), "removed_clients": len(dmeta["removed"])}
-
-    def configure_fit(self, server_round: int, parameters, client_manager):
-        # Save current global parameters so aggregate_fit can compute deltas for defense.
-        try:
-            self._round_global = parameters_to_ndarrays(parameters)
-        except Exception:
-            self._round_global = None
-        pairs = super().configure_fit(server_round, parameters, client_manager)
-        # Propagate round number so client logs can show progress clearly.
-        for _, fit_ins in pairs:
-            fit_ins.config["server_round"] = int(server_round)
-        return pairs
-
-
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8080)
-    ap.add_argument("--rounds", type=int, default=10)
-    ap.add_argument("--aggregation", choices=["fedavg", "krum"], default="fedavg")
-    ap.add_argument("--config", default="config.yaml")
-    ap.add_argument("--expected_clients", type=int, default=0, help="If set, wait for this many clients per round")
+    ap.add_argument("--rounds", type=int, default=5)
+    ap.add_argument("--aggregation", choices=["fedavg"], default="fedavg")  # research experiments use FedAvg
+    ap.add_argument("--config", default="config.baseline.yaml")
+    ap.add_argument("--expected_clients", type=int, default=0)
+    ap.add_argument("--round_stats_out", default="", help="Optional JSONL output for per-round stats")
     args = ap.parse_args()
 
-    cfg = yaml.safe_load(open(args.config, "r", encoding="utf-8"))
-
-    seed = int(((cfg.get("runtime") or {}).get("seed")) or 1234)
-    random.seed(seed)
-    np.random.seed(seed)
-
-    init_params = ndarrays_to_parameters(get_parameters(cfg["model"]["initial_weights"]))
-
-    min_fit = int(cfg["federated"]["min_fit_clients"])
-    min_avail = int(cfg["federated"]["min_available_clients"])
-    if args.expected_clients and args.expected_clients > 0:
-        min_fit = max(min_fit, args.expected_clients)
-        min_avail = max(min_avail, args.expected_clients)
-
-    strategy = CustomStrategy(
-        cfg=cfg,
-        aggregation=args.aggregation,
-        fraction_fit=1.0,
-        min_fit_clients=min_fit,
-        min_available_clients=min_avail,
-        initial_parameters=init_params,
-    )
-
-    fl.server.start_server(
-        server_address=f"{args.host}:{args.port}",
-        config=fl.server.ServerConfig(num_rounds=args.rounds),
-        strategy=strategy,
+    run_server(
+        host=str(args.host),
+        port=int(args.port),
+        rounds=int(args.rounds),
+        cfg_path=str(args.config),
+        expected_clients=int(args.expected_clients),
+        round_stats_out=str(args.round_stats_out),
     )
 
 
 if __name__ == "__main__":
     main()
+

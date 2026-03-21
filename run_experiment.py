@@ -59,11 +59,16 @@ def main():
         "--malicious_selection",
         choices=["random", "topk_src_class"],
         default="random",
-        help="How to choose malicious clients. topk_src_class uses partition_stats.yaml and attack.label_flip.src_class_id.",
+        help="How to choose malicious clients. topk_src_class uses partition_stats.yaml and attack.(label_flip|backdoor).src_class_id.",
     )
-    ap.add_argument("--aggregation", choices=["fedavg", "krum"], default="fedavg")
+    ap.add_argument(
+        "--aggregation",
+        choices=["fedavg"],
+        default="fedavg",
+        help="Research experiments use FedAvg; robustness comes from defenses on deltas.",
+    )
     ap.add_argument("--rounds", type=int, default=5)
-    ap.add_argument("--config", default="config.yaml")
+    ap.add_argument("--config", default="config.baseline.yaml")
     ap.add_argument("--log_dir", default="./logs", help="Write server/client logs here")
     ap.add_argument(
         "--server_ready_timeout_s",
@@ -107,8 +112,9 @@ def main():
         if not stats_path.exists():
             return set(random.sample(range(args.num_clients), k)) if k > 0 else set()
         stats = yaml.safe_load(open(stats_path, "r", encoding="utf-8")) or {}
-        # Determine src class from config.
-        src = int((((cfg.get("attack") or {}).get("label_flip") or {}).get("src_class_id")) or 0)
+        # Determine src class from config (prefer label_flip, fall back to backdoor).
+        attack_cfg = cfg.get("attack") or {}
+        src = int((((attack_cfg.get("label_flip") or {}).get("src_class_id")) or ((attack_cfg.get("backdoor") or {}).get("src_class_id")) or 0))
         scored = []
         for cid in range(args.num_clients):
             key = f"client_{cid}"
@@ -159,6 +165,7 @@ def main():
         "--aggregation", args.aggregation,
         "--config", args.config,
         "--expected_clients", str(args.num_clients),
+        "--round_stats_out", str((log_dir / "round_stats.jsonl").resolve()),
     ]
     server = None
     clients = []
@@ -255,6 +262,11 @@ def main():
             "--asr_target_class_id", str(cfg["eval"].get("asr_target_class_id", cfg["eval"].get("poisoned_class_id", 16))),
             "--asr_iou", str(cfg["eval"].get("asr_iou", 0.5)),
         ]
+        if bool(cfg["eval"].get("asr_trigger", False)):
+            eval_cmd.append("--asr_trigger")
+            eval_cmd += ["--trigger_size", str(int(cfg["eval"].get("trigger_size", 16)))]
+            eval_cmd += ["--trigger_value", str(int(cfg["eval"].get("trigger_value", 255)))]
+            eval_cmd += ["--trigger_position", str(cfg["eval"].get("trigger_position", "bottom_right"))]
         subprocess.run(eval_cmd, check=False)
 
 

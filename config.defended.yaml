@@ -3,13 +3,12 @@ server:
   port: 8084
 
 dataset:
-  # Use a local YAML (not an alias) so label-flip can read train/val paths.
   base_data_yaml: "./datasets/coco128/coco128.yaml"
   val_ratio: 0.2
 
 federated:
   auto_partition: true
-  data_dir: "./federated_data_poison"
+  data_dir: "./federated_data_defended"
   partition: "dirichlet"
   dirichlet_alpha: 0.5
   min_fit_clients: 10
@@ -17,48 +16,88 @@ federated:
 
 model:
   initial_weights: "yolov8n.pt"
-  global_out: "./artifacts_poison/defended.pt"
+  global_out: "./artifacts/defended.pt"
 
 train:
   local_epochs: 2
   imgsz: 320
-  batch: 2
+  batch: 4
   device: "cuda:0"
-
-aggregation:
-  krum_byzantine: 1
 
 attack:
   malicious_selection: "topk_src_class"
+
   label_flip:
-    enabled: true
-    # COCO class ids (Ultralytics): person=0, dog=16
+    enabled: false
+    poison_ratio: 0.2
     src_class_id: 0
     dst_class_id: 56
-    prob: 1.0
+    prob: 0.5
     seed: 42
+
+  bbox_distortion:
+    enabled: false
+    poison_ratio: 0.2
+    shift_xy: 0.05
+    shift_wh: 0.03
+    prob: 0.3
+    seed: 43
+
+  object_removal:
+    enabled: false
+    poison_ratio: 0.2
+    target_class_id: 0
+    prob: 0.3
+    seed: 44
+
+  backdoor:
+    enabled: true
+    poison_ratio: 0.2
+    trigger_size: 16
+    trigger_value: 255
+    position: "bottom_right"
+    src_class_id: 0
+    target_class_id: 56
+    prob: 1.0
+    seed: 45
+
   model_poison:
     enabled: false
-    strength: 2.0
-    mode: "signflip"
+    mode: "stealth"
+    strength: 1.0
+    stealth_beta: 0.1
+    max_scale: 2.0
+    seed: 46
 
 defense:
   enabled: true
-  cosine_z: 1.0
+  cosine_z: 1.8
   norm_z: 2.5
-  min_votes: 2
+  dist_z: 2.0
+  weights:
+    cosine: 1.5
+    norm: 1.0
+    dist: 1.0
+  min_score: 2.5
+  use_mad: true
+  min_clients: 4
 
 runtime:
   tmp_dir: "./tmp"
-  train_runs_dir: "./runs_fl_poison"
+  train_runs_dir: "./runs_fl/defended"
   seed: 1234
 
 eval:
   run_after_experiment: false
   data_yaml: "./datasets/coco128/coco128.yaml"
+  baseline_model: "./artifacts/baseline.pt"
+  attacked_model: "./artifacts/attack.pt"
+  defended_model: "./artifacts/defended.pt"
   asr_src_class_id: 0
   asr_target_class_id: 56
   asr_iou: 0.5
-  baseline_model: "yolov8n.pt"
-  attacked_model: "./artifacts_poison/attack.pt"
-  defended_model: "./artifacts_poison/defended.pt"
+  asr_trigger: true
+  trigger_size: 16
+  trigger_value: 255
+  trigger_position: "bottom_right"
+

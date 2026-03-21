@@ -40,7 +40,7 @@ Run these in order so you get 3 models for your results table.
 python run_experiment.py --config config.baseline.yaml --log_dir ./logs/baseline
 ```
 
-Output model: `./artifacts_poison/baseline.pt`
+Output model: `./artifacts/baseline.pt`
 
 ### 3.2 Attack (poisoning, no defense)
 
@@ -48,7 +48,7 @@ Output model: `./artifacts_poison/baseline.pt`
 python run_experiment.py --config config.attack.yaml --log_dir ./logs/attack
 ```
 
-Output model: `./artifacts_poison/attack.pt`
+Output model: `./artifacts/attack.pt`
 
 ### 3.3 Defended (poisoning + defense)
 
@@ -56,7 +56,7 @@ Output model: `./artifacts_poison/attack.pt`
 python run_experiment.py --config config.defended.yaml --log_dir ./logs/defended
 ```
 
-Output model: `./artifacts_poison/defended.pt`
+Output model: `./artifacts/defended.pt`
 
 Notes:
 
@@ -70,14 +70,15 @@ Example: `person (0) -> dog (16)` with IoU threshold 0.5.
 ```bash
 python evaluate.py \
   --data ./datasets/coco128/coco128.yaml \
-  --baseline ./artifacts_poison/baseline.pt \
-  --attacked ./artifacts_poison/attack.pt \
-  --defended ./artifacts_poison/defended.pt \
+  --baseline ./artifacts/baseline.pt \
+  --attacked ./artifacts/attack.pt \
+  --defended ./artifacts/defended.pt \
   --device cuda:0 \
   --imgsz 320 \
   --asr_src_class_id 0 \
-  --asr_target_class_id 16 \
-  --asr_iou 0.5
+  --asr_target_class_id 56 \
+  --asr_iou 0.5 \
+  --asr_trigger
 ```
 
 `evaluate.py` writes a table to stdout and saves YOLO validation outputs under `runs/detect/...`.
@@ -117,4 +118,3 @@ Important fields:
 
 - Use `--device cuda:0` (not `device=gpu`).
 - Logs: pass `--log_dir /content/...` and tail `server.log` / `client_*.log` in another cell.
-

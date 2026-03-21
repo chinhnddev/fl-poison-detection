@@ -121,6 +121,7 @@ def train_local(
     device: str,
     project: str,
     name: str,
+    seed: int = 0,
 ) -> Tuple[NDArrays, int, Dict]:
     model = YOLO(model_path)
     model.train(
@@ -129,6 +130,8 @@ def train_local(
         imgsz=imgsz,
         batch=batch,
         device=device,
+        seed=int(seed),
+        deterministic=True,
         workers=0,
         amp=False,
         val=False,

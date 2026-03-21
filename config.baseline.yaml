@@ -9,53 +9,53 @@ dataset:
 federated:
   auto_partition: true
   data_dir: "./federated_data_baseline"
-  partition: "dirichlet"
+  partition: "dirichlet"     # "iid" or "dirichlet"
   dirichlet_alpha: 0.5
   min_fit_clients: 10
   min_available_clients: 10
 
 model:
   initial_weights: "yolov8n.pt"
-  global_out: "./artifacts_poison/baseline.pt"
+  global_out: "./artifacts/baseline.pt"
 
 train:
   local_epochs: 2
   imgsz: 320
-  batch: 2
+  batch: 4
   device: "cuda:0"
 
-aggregation:
-  krum_byzantine: 1
-
 attack:
+  malicious_selection: "random"
   label_flip:
     enabled: false
-    src_class_id: 0
-    dst_class_id: 16
-    prob: 1.0
-    seed: 42
+  bbox_distortion:
+    enabled: false
+  object_removal:
+    enabled: false
+  backdoor:
+    enabled: false
   model_poison:
     enabled: false
-    strength: 3.0
-    mode: "signflip"
 
 defense:
   enabled: false
-  cosine_z: 1.0
-  norm_z: 2.5
-  min_votes: 2
 
 runtime:
   tmp_dir: "./tmp"
-  train_runs_dir: "./runs_fl_baseline"
+  train_runs_dir: "./runs_fl/baseline"
   seed: 1234
 
 eval:
   run_after_experiment: false
   data_yaml: "./datasets/coco128/coco128.yaml"
+  baseline_model: "./artifacts/baseline.pt"
+  attacked_model: "./artifacts/attack.pt"
+  defended_model: "./artifacts/defended.pt"
   asr_src_class_id: 0
-  asr_target_class_id: 16
+  asr_target_class_id: 56
   asr_iou: 0.5
-  baseline_model: "yolov8n.pt"
-  attacked_model: "./artifacts_poison/attack.pt"
-  defended_model: "./artifacts_poison/defended.pt"
+  asr_trigger: false
+  trigger_size: 16
+  trigger_value: 255
+  trigger_position: "bottom_right"
+
