@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 import os
 import shutil
+import time
 
 import numpy as np
 import yaml
@@ -103,7 +104,22 @@ def _dominant_class(label_path: Path) -> int:
     if not label_path.exists():
         return -1
     c = Counter()
-    for line in label_path.read_text(encoding="utf-8").splitlines():
+
+    # On Google Drive (Colab), file reads can intermittently fail with
+    # ConnectionAbortedError / transport endpoint issues. Treat as missing label.
+    text = None
+    for _ in range(5):
+        try:
+            with open(label_path, "r", encoding="utf-8", errors="replace") as f:
+                text = f.read()
+            break
+        except OSError:
+            time.sleep(0.2)
+            continue
+    if text is None:
+        return -1
+
+    for line in text.splitlines():
         line = line.strip()
         if not line:
             continue

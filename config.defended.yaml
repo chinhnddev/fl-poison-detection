@@ -34,7 +34,7 @@ attack:
     enabled: true
     # COCO class ids (Ultralytics): person=0, dog=16
     src_class_id: 0
-    dst_class_id: 16
+    dst_class_id: 56
     prob: 1.0
     seed: 42
   model_poison:
@@ -57,7 +57,7 @@ eval:
   run_after_experiment: false
   data_yaml: "./datasets/coco128/coco128.yaml"
   asr_src_class_id: 0
-  asr_target_class_id: 16
+  asr_target_class_id: 56
   asr_iou: 0.5
   baseline_model: "yolov8n.pt"
   attacked_model: "./artifacts_poison/attack.pt"
