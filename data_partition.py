@@ -282,7 +282,11 @@ def write_federated_shards(
         # Build a client-local dataset view so Ultralytics writes cache into client_dir/labels/*.
         _write_client_view(client_dir, train_imgs=imgs, val_imgs=val_images)
 
-        client_yaml = {"path": str(client_dir.resolve()), "train": "images/train", "val": "images/val"}
+        client_yaml = {
+            "path": str(client_dir.resolve()),
+            "train": str((client_dir / "images" / "train").resolve()),
+            "val": str((client_dir / "images" / "val").resolve())
+        }
         if nc is not None:
             client_yaml["nc"] = nc
         if names is not None:
