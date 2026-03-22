@@ -20,7 +20,7 @@ from attack import (
     build_poisoned_dataset,
     poison_delta,
 )
-from train_yolo import get_parameters, set_global_seed, set_parameters_to_model, train_local
+from train_yolo import collect_detection_stats, get_parameters, set_global_seed, set_parameters_to_model, train_local
 
 NDArrays = List[np.ndarray]
 
@@ -155,6 +155,13 @@ class YoloDeltaClient(fl.client.NumPyClient):
         self.base_model = str(cfg["model"]["initial_weights"])
         self.device = str(cfg["train"]["device"])
 
+        # Detection-aware defense: collect prediction statistics after local training.
+        # Controlled by defense.collect_detection_stats in the YAML config.
+        defense_cfg = cfg.get("defense") or {}
+        self._collect_det_stats = bool(defense_cfg.get("collect_detection_stats", False))
+        self._det_stats_max_images = int(defense_cfg.get("det_stats_max_images", 50))
+        self._det_stats_conf = float(defense_cfg.get("det_stats_conf", 0.25))
+
         logging.getLogger("client").info(
             "cid=%s malicious=%s shard=%s local_epochs=%s imgsz=%s batch=%s device=%s",
             self.cid,
@@ -233,6 +240,32 @@ class YoloDeltaClient(fl.client.NumPyClient):
 
         metrics = dict(metrics)
         metrics["malicious"] = int(self.malicious)
+
+        # ── Detection-aware defense: collect prediction stats ─────────────────
+        if self._collect_det_stats:
+            ckpt_path = metrics.pop("_ckpt_path", "")
+            if ckpt_path and Path(ckpt_path).exists():
+                try:
+                    det_json = collect_detection_stats(
+                        model_path=ckpt_path,
+                        val_yaml=self.data_yaml,
+                        imgsz=int(self.cfg["train"]["imgsz"]),
+                        device=self.device,
+                        max_images=self._det_stats_max_images,
+                        conf=self._det_stats_conf,
+                        global_model_path=str(tmp_model),
+                    )
+                    if det_json:
+                        metrics["detection_stats"] = det_json
+                        logger.info("DET_STATS cid=%s round=%s len=%s", self.cid, server_round, len(det_json))
+                except Exception as exc:
+                    logger.warning("DET_STATS_ERROR cid=%s round=%s err=%s", self.cid, server_round, exc)
+            else:
+                # Remove internal key even if stats not collected
+                metrics.pop("_ckpt_path", None)
+        else:
+            metrics.pop("_ckpt_path", None)
+
         logger.info("FIT_END cid=%s round=%s seconds=%.2f num_examples=%s", self.cid, server_round, time.time() - t0, n)
         return delta, int(n), metrics
 

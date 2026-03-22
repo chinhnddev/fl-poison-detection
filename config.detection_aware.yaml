@@ -1,6 +1,6 @@
 server:
   host: "127.0.0.1"
-  port: 8084
+  port: 8086
 
 dataset:
   base_data_yaml: "./datasets/coco128/coco128.yaml"
@@ -8,7 +8,7 @@ dataset:
 
 federated:
   auto_partition: true
-  data_dir: "./federated_data_defended"
+  data_dir: "./federated_data_da_defended"
   partition: "dirichlet"
   dirichlet_alpha: 0.5
   min_fit_clients: 10
@@ -16,14 +16,13 @@ federated:
 
 model:
   initial_weights: "yolov8n.pt"
-  global_out: "./artifacts/defended.pt"
+  global_out: "./artifacts/da_defended.pt"
 
 train:
   local_epochs: 2
   imgsz: 320
   batch: 4
   device: "cuda:0"
-  # Backdoor triggers are spatial patterns; disabling heavy augmentation improves ASR stability.
   mosaic: 0.0
   mixup: 0.0
   copy_paste: 0.0
@@ -82,7 +81,8 @@ attack:
 
 defense:
   enabled: true
-  # ── Gradient-based thresholds ──────────────────────────────────────────────
+
+  # ── Gradient-based thresholds ─────────────────────────────────────────────
   cosine_z: 1.8
   norm_z: 2.5
   dist_z: 2.0
@@ -90,22 +90,39 @@ defense:
     cosine: 1.5
     norm: 1.0
     dist: 1.0
+
+  # ── Detection-aware extension ─────────────────────────────────────────────
+  # Activate the detection-aware defense: clients report class frequency,
+  # bbox statistics and detection rate which the server uses as additional
+  # anomaly signals on top of gradient-level analysis.
+  detection_aware: true
+
+  # Detection-specific thresholds
+  class_freq_z: 2.0          # z-score for class-frequency L1 deviation (label-flip signal)
+  bbox_z: 2.0                # z-score for bbox distribution deviation  (bbox distortion signal)
+  detection_rate_z: 2.0      # |z|-score for dets/image deviation        (removal signal)
+  iou_z: 2.0                 # z-score for IoU-vs-global deviation       (geometry signal)
+
+  # Detection scoring weights (higher = stricter for that attack type)
+  detection_weights:
+    class_freq: 2.0           # high: class flip is the clearest label-flip signal
+    bbox: 1.0
+    detection_rate: 1.0
+    iou: 1.5
+
   min_score: 2.5
   use_mad: true
   min_clients: 4
-  # ── Detection-aware extension ─────────────────────────────────────────────
-  # Set detection_aware: true to activate the detection-aware defense which
-  # additionally uses per-client prediction statistics (class frequencies,
-  # bbox distributions, detection rate, IoU vs global) reported by clients.
-  # Clients must also set collect_detection_stats: true below.
-  detection_aware: false
-  collect_detection_stats: false   # set true to enable client-side stat collection
-  det_stats_max_images: 50         # max val images for client inference
-  det_stats_conf: 0.25             # confidence threshold for client inference
+  nc: 80                      # number of YOLO detection classes (COCO)
+
+  # Client-side inference settings for detection stat collection
+  collect_detection_stats: true  # clients run inference on their val set each round
+  det_stats_max_images: 50       # max images per client per round (keeps overhead low)
+  det_stats_conf: 0.25           # prediction confidence threshold
 
 runtime:
   tmp_dir: "./tmp"
-  train_runs_dir: "./runs_fl/defended"
+  train_runs_dir: "./runs_fl/da_defended"
   seed: 1234
 
 eval:
@@ -113,7 +130,7 @@ eval:
   data_yaml: "./datasets/coco128/coco128.yaml"
   baseline_model: "./artifacts/baseline.pt"
   attacked_model: "./artifacts/attack.pt"
-  defended_model: "./artifacts/defended.pt"
+  defended_model: "./artifacts/da_defended.pt"
   asr_src_class_id: 0
   asr_target_class_id: 56
   asr_iou: 0.5
