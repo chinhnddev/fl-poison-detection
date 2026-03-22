@@ -55,6 +55,7 @@ def main():
     ap.add_argument("--asr_target_class_id", type=int, default=-1)
     ap.add_argument("--asr_iou", type=float, default=0.5)
     ap.add_argument("--asr_limit_images", type=int, default=0)
+    ap.add_argument("--asr_mode", choices=["strict", "relaxed"], default="strict")
     ap.add_argument("--asr_trigger", action="store_true", help="Inject trigger into val images when computing ASR")
     ap.add_argument("--trigger_size", type=int, default=16)
     ap.add_argument("--trigger_value", type=int, default=255)
@@ -81,6 +82,7 @@ def main():
                 trigger_size=args.trigger_size,
                 trigger_value=args.trigger_value,
                 trigger_position=args.trigger_position,
+                mode=str(args.asr_mode),
                 limit_images=args.asr_limit_images,
             )
         rows.append(EvalResult(name=name, model=mp, map50=mm["map50"], map5095=mm["map5095"], asr=asr, extra={}))
@@ -90,4 +92,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

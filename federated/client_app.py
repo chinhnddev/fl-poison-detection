@@ -192,6 +192,28 @@ class YoloDeltaClient(fl.client.NumPyClient):
             project=str(self.cfg["runtime"]["train_runs_dir"]),
             name=f"client_{self.cid}",
             seed=int(((self.cfg.get("runtime") or {}).get("seed") or 1234)) + self.cid + 1000 * max(server_round, 0),
+            train_overrides={
+                # Backdoor triggers are spatial patterns; heavy aug (mosaic/crop/flip) can destroy them.
+                # Keep these configurable via YAML; default behavior stays Ultralytics defaults unless set.
+                k: (self.cfg.get("train") or {}).get(k)
+                for k in [
+                    "augment",
+                    "mosaic",
+                    "mixup",
+                    "copy_paste",
+                    "fliplr",
+                    "flipud",
+                    "hsv_h",
+                    "hsv_s",
+                    "hsv_v",
+                    "degrees",
+                    "translate",
+                    "scale",
+                    "shear",
+                    "perspective",
+                ]
+                if k in (self.cfg.get("train") or {})
+            },
         )
 
         # delta = local - global

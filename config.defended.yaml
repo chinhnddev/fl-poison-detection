@@ -23,6 +23,17 @@ train:
   imgsz: 320
   batch: 4
   device: "cuda:0"
+  # Backdoor triggers are spatial patterns; disabling heavy augmentation improves ASR stability.
+  mosaic: 0.0
+  mixup: 0.0
+  copy_paste: 0.0
+  fliplr: 0.0
+  flipud: 0.0
+  degrees: 0.0
+  translate: 0.0
+  scale: 0.0
+  shear: 0.0
+  perspective: 0.0
 
 attack:
   malicious_selection: "topk_src_class"
@@ -96,8 +107,8 @@ eval:
   asr_src_class_id: 0
   asr_target_class_id: 56
   asr_iou: 0.5
+  asr_mode: "strict"
   asr_trigger: true
   trigger_size: 16
   trigger_value: 255
   trigger_position: "bottom_right"
-

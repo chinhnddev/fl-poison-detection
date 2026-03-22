@@ -145,6 +145,7 @@ def asr_backdoor_object_level(
     trigger_size: int,
     trigger_value: int,
     trigger_position: str,
+    mode: str = "strict",
     limit_images: int = 0,
     tmp_dir: str = "./tmp/asr_triggered",
 ) -> Optional[float]:
@@ -216,6 +217,7 @@ def asr_backdoor_object_level(
             best_iou = 0.0
             best_cls = None
             best_src_iou = 0.0
+            best_tgt_iou = 0.0
             for c, pr in preds:
                 i = _iou(gt, pr)
                 if i > best_iou:
@@ -223,8 +225,18 @@ def asr_backdoor_object_level(
                     best_cls = c
                 if c == int(src_class_id) and i > best_src_iou:
                     best_src_iou = i
-            if best_iou >= float(iou_thres) and best_cls == int(target_class_id) and best_src_iou < float(iou_thres):
-                num += 1
+                if c == int(target_class_id) and i > best_tgt_iou:
+                    best_tgt_iou = i
+
+            m = str(mode).strip().lower()
+            if m in {"relaxed", "loose"}:
+                # Relaxed ASR: success if there exists a target-class prediction overlapping the GT src object.
+                if best_tgt_iou >= float(iou_thres):
+                    num += 1
+            else:
+                # Strict ASR (paper-style): matched prediction must be target, and no correct-class match exists.
+                if best_iou >= float(iou_thres) and best_cls == int(target_class_id) and best_src_iou < float(iou_thres):
+                    num += 1
 
     if denom == 0:
         return None

@@ -32,6 +32,7 @@ def _evaluate(
     trigger_size: int,
     trigger_value: int,
     trigger_position: str,
+    asr_mode: str,
     baseline: str,
     attacked: str,
     defended: str,
@@ -55,6 +56,7 @@ def _evaluate(
         str(imgsz),
     ]
     cmd += ["--asr_src_class_id", str(asr_src_class_id), "--asr_target_class_id", str(asr_target_class_id)]
+    cmd += ["--asr_mode", str(asr_mode)]
     if asr_trigger:
         cmd.append("--asr_trigger")
         cmd += ["--trigger_size", str(int(trigger_size))]
@@ -94,6 +96,7 @@ def main() -> None:
         trigger_size = int(bd.get("trigger_size", 16))
         trigger_value = int(bd.get("trigger_value", 255))
         trigger_position = str(bd.get("position", "bottom_right"))
+        asr_mode = "strict"
     else:
         src_id = int(lf.get("src_class_id", 0))
         dst_id = int(lf.get("dst_class_id", 56))
@@ -101,6 +104,7 @@ def main() -> None:
         trigger_size = 16
         trigger_value = 255
         trigger_position = "bottom_right"
+        asr_mode = "strict"
 
     out_dir = repo / "artifacts"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -223,6 +227,7 @@ def main() -> None:
         trigger_size=int(trigger_size),
         trigger_value=int(trigger_value),
         trigger_position=str(trigger_position),
+        asr_mode=str(asr_mode),
         baseline=baseline_model,
         attacked=str((out_dir / "attack.pt").resolve()),
         defended=str((out_dir / "defended.pt").resolve()),

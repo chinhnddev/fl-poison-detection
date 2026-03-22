@@ -272,6 +272,7 @@ def main():
             "--asr_src_class_id", str(cfg["eval"].get("asr_src_class_id", 0)),
             "--asr_target_class_id", str(cfg["eval"].get("asr_target_class_id", cfg["eval"].get("poisoned_class_id", 16))),
             "--asr_iou", str(cfg["eval"].get("asr_iou", 0.5)),
+            "--asr_mode", str(cfg["eval"].get("asr_mode", "strict")),
         ]
         if bool(cfg["eval"].get("asr_trigger", False)):
             eval_cmd.append("--asr_trigger")

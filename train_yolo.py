@@ -1,7 +1,7 @@
 import os
 import random
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # Ultralytics creates a settings directory on import. In locked-down environments
 # `%APPDATA%` may be non-writable; set a repo-local config root to avoid failures.
@@ -15,6 +15,41 @@ import numpy as np
 from ultralytics import YOLO
 
 NDArrays = List[np.ndarray]
+
+
+def _clear_yolo_label_caches(data_yaml: str) -> None:
+    """Best-effort cache cleanup.
+
+    Ultralytics writes *.cache under labels directories. When re-running experiments with
+    modified labels (poisoning) on networked filesystems (e.g. Google Drive), stale caches
+    can cause confusing behavior. Clearing is safe and deterministic for our per-client views.
+    """
+    try:
+        yp = Path(data_yaml)
+        if not yp.exists():
+            return
+        cfg = yaml.safe_load(yp.read_text(encoding="utf-8")) or {}
+        root = cfg.get("path", "")
+        root_p = Path(str(root)) if root else yp.parent
+        if not root_p.is_absolute():
+            root_p = (yp.parent / root_p).resolve()
+
+        for base in [root_p, yp.parent]:
+            lbl = base / "labels"
+            if lbl.exists() and lbl.is_dir():
+                for c in lbl.rglob("*.cache"):
+                    try:
+                        c.unlink()
+                    except Exception:
+                        pass
+        # Also clear any top-level dataset cache created by Ultralytics (e.g. repo.cache).
+        for c in yp.parent.glob("*.cache"):
+            try:
+                c.unlink()
+            except Exception:
+                pass
+    except Exception:
+        return
 
 
 def set_global_seed(seed: int, deterministic: bool = True) -> None:
@@ -122,8 +157,15 @@ def train_local(
     project: str,
     name: str,
     seed: int = 0,
+    train_overrides: Optional[Dict[str, Any]] = None,
 ) -> Tuple[NDArrays, int, Dict]:
     model = YOLO(model_path)
+
+    extra = dict(train_overrides or {})
+    extra = {k: v for k, v in extra.items() if v is not None}
+
+    _clear_yolo_label_caches(data_yaml)
+
     model.train(
         data=data_yaml,
         epochs=epochs,
@@ -140,6 +182,7 @@ def train_local(
         name=name,
         exist_ok=True,
         verbose=False,
+        **extra,
     )
 
     # Use trainer's save_dir when available (Ultralytics may write under runs/detect/...).
