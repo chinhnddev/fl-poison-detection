@@ -1,3 +1,4 @@
+import json
 import os
 import random
 from pathlib import Path
@@ -206,4 +207,193 @@ def train_local(
     trained = YOLO(str(ckpt))
     params = [v.detach().cpu().numpy() for _, v in trained.model.state_dict().items()]
     n = count_train_images(data_yaml, trainer=trainer)
-    return params, n, {"train_images": n}
+    # _ckpt_path is an internal field consumed by the client to collect detection stats;
+    # it is stripped from the metrics dict before they are sent to the server.
+    return params, n, {"train_images": n, "_ckpt_path": str(ckpt)}
+
+
+def collect_detection_stats(
+    model_path: str,
+    val_yaml: str,
+    imgsz: int,
+    device: str,
+    max_images: int = 50,
+    conf: float = 0.25,
+    global_model_path: str = "",
+) -> str:
+    """Run inference on a capped validation subset and return a compact JSON string.
+
+    The JSON encodes lightweight detection statistics used by the detection-aware
+    defense on the server to flag anomalous client updates:
+
+    - ``class_freq``: raw per-class detection counts (only classes with ≥ 1 detection)
+    - ``bbox_w_mean``, ``bbox_h_mean``: mean normalized bbox width/height
+    - ``bbox_w_std``,  ``bbox_h_std``:  std  normalized bbox width/height
+    - ``bbox_xc_mean``, ``bbox_yc_mean``: mean bbox centre coordinates
+    - ``total_detections``: total number of detected objects across all images
+    - ``num_images``: number of images processed
+    - ``mean_iou_vs_global``: mean IoU of this model's predictions vs the global
+      model's predictions on the same images (omitted when ``global_model_path``
+      is empty or inference on the global model fails)
+
+    Returns an empty string ``""`` on any error so the caller can safely skip stats.
+    """
+    try:
+        import yaml as _yaml
+
+        yp = Path(val_yaml)
+        if not yp.exists():
+            return ""
+        cfg_data = _yaml.safe_load(yp.read_text(encoding="utf-8")) or {}
+        val_ref = cfg_data.get("val", "")
+        if not val_ref:
+            return ""
+
+        # Resolve val path relative to yaml location
+        vp = Path(str(val_ref))
+        if not vp.is_absolute():
+            vp1 = (yp.parent / vp).resolve()
+            root = cfg_data.get("path", "")
+            if root:
+                vp2 = (yp.parent / Path(str(root)) / vp).resolve()
+                vp = vp2 if vp2.exists() else (vp1 if vp1.exists() else vp)
+            else:
+                vp = vp1
+
+        # Collect images
+        exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+        if vp.suffix.lower() == ".txt" and vp.exists():
+            imgs = [
+                Path(l.strip())
+                for l in vp.read_text(encoding="utf-8").splitlines()
+                if l.strip()
+            ]
+            # Resolve relative paths
+            imgs = [(vp.parent / p).resolve() if not p.is_absolute() else p for p in imgs]
+        elif vp.exists() and vp.is_dir():
+            imgs = [x for x in vp.rglob("*") if x.suffix.lower() in exts]
+        else:
+            return ""
+
+        imgs = [p for p in imgs if p.exists()]
+        if not imgs:
+            return ""
+
+        # Limit to max_images (deterministic: take first N after sort)
+        imgs = sorted(imgs)[: int(max_images)]
+
+        model = YOLO(model_path)
+        results = model.predict(
+            source=[str(p) for p in imgs],
+            imgsz=int(imgsz),
+            device=str(device),
+            conf=float(conf),
+            verbose=False,
+        )
+
+        class_freq: Dict[str, int] = {}
+        bbox_widths: List[float] = []
+        bbox_heights: List[float] = []
+        bbox_xcs: List[float] = []
+        bbox_ycs: List[float] = []
+        # Store per-image predicted boxes for IoU computation: list of [(cls,x1,y1,x2,y2), ...]
+        pred_boxes_per_img: List[List[Tuple]] = []
+
+        for res in results:
+            boxes = getattr(res, "boxes", None)
+            img_preds: List[Tuple] = []
+            if boxes is not None:
+                cls_t = getattr(boxes, "cls", None)
+                xywhn_t = getattr(boxes, "xywhn", None)
+                xyxy_t = getattr(boxes, "xyxy", None)
+                if cls_t is not None and xywhn_t is not None:
+                    try:
+                        cls_arr = cls_t.detach().cpu().numpy().astype(int).tolist()
+                        xywhn_arr = xywhn_t.detach().cpu().numpy().tolist()
+                        xyxy_arr = xyxy_t.detach().cpu().numpy().tolist() if xyxy_t is not None else []
+                    except Exception:
+                        cls_arr, xywhn_arr, xyxy_arr = [], [], []
+                    for box_idx, (cls, (xc, yc, w, h)) in enumerate(zip(cls_arr, xywhn_arr)):
+                        key = str(int(cls))
+                        class_freq[key] = class_freq.get(key, 0) + 1
+                        bbox_widths.append(float(w))
+                        bbox_heights.append(float(h))
+                        bbox_xcs.append(float(xc))
+                        bbox_ycs.append(float(yc))
+                        if box_idx < len(xyxy_arr):
+                            img_preds.append((int(cls), *map(float, xyxy_arr[box_idx])))
+            pred_boxes_per_img.append(img_preds)
+
+        def _safe_mean(lst: List[float]) -> float:
+            return float(np.mean(lst)) if lst else 0.0
+
+        def _safe_std(lst: List[float]) -> float:
+            return float(np.std(lst)) if lst else 0.0
+
+        total_dets = sum(class_freq.values())
+        stats: Dict = {
+            "class_freq": class_freq,
+            "bbox_w_mean": _safe_mean(bbox_widths),
+            "bbox_w_std": _safe_std(bbox_widths),
+            "bbox_h_mean": _safe_mean(bbox_heights),
+            "bbox_h_std": _safe_std(bbox_heights),
+            "bbox_xc_mean": _safe_mean(bbox_xcs),
+            "bbox_yc_mean": _safe_mean(bbox_ycs),
+            "total_detections": int(total_dets),
+            "num_images": int(len(imgs)),
+        }
+
+        # ── Optional: IoU vs global model ────────────────────────────────────
+        if global_model_path and Path(global_model_path).exists():
+            try:
+                gmodel = YOLO(global_model_path)
+                g_results = gmodel.predict(
+                    source=[str(p) for p in imgs],
+                    imgsz=int(imgsz),
+                    device=str(device),
+                    conf=float(conf),
+                    verbose=False,
+                )
+                iou_vals: List[float] = []
+                for res_g, client_preds in zip(g_results, pred_boxes_per_img):
+                    boxes_g = getattr(res_g, "boxes", None)
+                    if boxes_g is None or not client_preds:
+                        continue
+                    xyxy_g_t = getattr(boxes_g, "xyxy", None)
+                    if xyxy_g_t is None:
+                        continue
+                    try:
+                        gboxes = xyxy_g_t.detach().cpu().numpy().tolist()
+                    except Exception:
+                        continue
+                    if not gboxes:
+                        continue
+                    # Compute mean IoU between client predictions and global predictions
+                    for _, x1c, y1c, x2c, y2c in client_preds:
+                        best_iou = 0.0
+                        for gbox in gboxes:
+                            x1g, y1g, x2g, y2g = map(float, gbox[:4])
+                            ix1 = max(x1c, x1g)
+                            iy1 = max(y1c, y1g)
+                            ix2 = min(x2c, x2g)
+                            iy2 = min(y2c, y2g)
+                            iw = max(0.0, ix2 - ix1)
+                            ih = max(0.0, iy2 - iy1)
+                            inter = iw * ih
+                            if inter <= 0.0:
+                                continue
+                            area_c = max(0.0, x2c - x1c) * max(0.0, y2c - y1c)
+                            area_g = max(0.0, x2g - x1g) * max(0.0, y2g - y1g)
+                            denom = area_c + area_g - inter
+                            iou_val = float(inter / denom) if denom > 0 else 0.0
+                            if iou_val > best_iou:
+                                best_iou = iou_val
+                        iou_vals.append(best_iou)
+                if iou_vals:
+                    stats["mean_iou_vs_global"] = float(np.mean(iou_vals))
+            except Exception:
+                pass  # IoU vs global is optional; silently skip on any error
+
+        return json.dumps(stats, separators=(",", ":"))
+    except Exception:
+        return ""

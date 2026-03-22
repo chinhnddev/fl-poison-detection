@@ -13,7 +13,7 @@ from flwr.common import FitRes, Parameters, Scalar, ndarrays_to_parameters, para
 from flwr.server.client_proxy import ClientProxy
 
 from aggregation import weighted_fedavg
-from defense import DefenseConfig, robust_filter
+from defense import DefenseConfig, DetectionAwareDefenseConfig, detection_aware_filter, robust_filter
 from train_yolo import get_parameters, set_parameters_to_model
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -37,6 +37,41 @@ def _load_defense_cfg(cfg: Dict) -> DefenseConfig:
     )
 
 
+def _load_detection_aware_cfg(cfg: Dict) -> Optional[DetectionAwareDefenseConfig]:
+    """Return a DetectionAwareDefenseConfig if detection-aware defense is configured.
+
+    The detection-aware defense is activated when ``defense.detection_aware: true``
+    is set in the YAML.  All gradient and detection thresholds can be overridden
+    under the same ``defense`` block.
+    """
+    d = cfg.get("defense") or {}
+    if not bool(d.get("detection_aware", False)):
+        return None
+    w = d.get("weights") or {}
+    dw = d.get("detection_weights") or {}
+    return DetectionAwareDefenseConfig(
+        enabled=bool(d.get("enabled", True)),
+        cosine_z_threshold=float(d.get("cosine_z", d.get("cosine_z_threshold", 1.8))),
+        norm_z_threshold=float(d.get("norm_z", d.get("norm_z_threshold", 2.5))),
+        dist_z_threshold=float(d.get("dist_z", d.get("dist_z_threshold", 2.0))),
+        use_mad=bool(d.get("use_mad", True)),
+        class_freq_z_threshold=float(d.get("class_freq_z", 2.0)),
+        bbox_z_threshold=float(d.get("bbox_z", 2.0)),
+        detection_rate_z_threshold=float(d.get("detection_rate_z", 2.0)),
+        iou_z_threshold=float(d.get("iou_z", 2.0)),
+        weight_gradient_cosine=float(w.get("cosine", d.get("weight_gradient_cosine", 1.5))),
+        weight_gradient_norm=float(w.get("norm", d.get("weight_gradient_norm", 1.0))),
+        weight_gradient_dist=float(w.get("dist", d.get("weight_gradient_dist", 1.0))),
+        weight_class_freq=float(dw.get("class_freq", d.get("weight_class_freq", 2.0))),
+        weight_bbox=float(dw.get("bbox", d.get("weight_bbox", 1.0))),
+        weight_detection_rate=float(dw.get("detection_rate", d.get("weight_detection_rate", 1.0))),
+        weight_iou=float(dw.get("iou", d.get("weight_iou", 1.5))),
+        min_score=float(d.get("min_score", 2.5)),
+        min_clients=int(d.get("min_clients", 4)),
+        nc=int(d.get("nc", 80)),
+    )
+
+
 class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
     """FedAvg strategy where clients send deltas and server updates global weights."""
 
@@ -48,6 +83,8 @@ class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
         self._round_global: Optional[List[np.ndarray]] = None
         self._round_stats_out = str(round_stats_out)
         self._dcfg = _load_defense_cfg(cfg)
+        # Detection-aware defense takes priority over gradient-only defense when configured.
+        self._da_cfg: Optional[DetectionAwareDefenseConfig] = _load_detection_aware_cfg(cfg)
 
     def configure_fit(self, server_round: int, parameters: Parameters, client_manager):
         try:
@@ -82,7 +119,16 @@ class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
 
         filtered = list(updates_delta)
         dmeta: Dict = {"removed_cids": [], "reason": "defense_disabled"}
-        if self._dcfg.enabled:
+        if self._da_cfg is not None and self._da_cfg.enabled:
+            # Detection-aware defense: uses both gradient deltas and prediction stats.
+            filtered, dmeta = detection_aware_filter(updates_delta, metrics_rows, self._da_cfg)
+            logger.info(
+                "round=%s detection_aware_defense removed clients=%s has_det_stats=%s",
+                server_round,
+                dmeta.get("removed_cids", []),
+                dmeta.get("has_detection_stats", 0),
+            )
+        elif self._dcfg.enabled:
             filtered, dmeta = robust_filter(updates_delta, self._dcfg)
             logger.info("round=%s defense removed clients=%s", server_round, dmeta.get("removed_cids", []))
 

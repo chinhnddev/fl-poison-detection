@@ -102,19 +102,60 @@ Important fields:
 - `attack.label_flip.*`: label flip configuration
 - `attack.model_poison.*`: delta poisoning (`scale` / `signflip`) + `strength`
 - `defense.enabled`: enable/disable defense filtering
+- `defense.detection_aware`: enable detection-aware defense (requires `collect_detection_stats: true`)
+- `defense.collect_detection_stats`: clients run inference on val set each round and report stats
 - `model.global_out`: where the server saves the aggregated global model
 
-## 6) Code Layout
+## 6) Detection-Aware Defense
+
+The proposed detection-aware defense (`defense/detection_aware_filter.py`) extends the
+gradient-based outlier filter with object-detection-specific signals:
+
+| Signal | Detects |
+|---|---|
+| Class frequency deviation | Label-flip / backdoor attacks |
+| Bounding-box distribution deviation | BBox distortion attacks |
+| Detection rate deviation | Object removal attacks |
+| IoU vs global model | Poisoning that distorts prediction geometry |
+
+### Run with detection-aware defense
+
+```bash
+python run_experiment.py --config config.detection_aware.yaml --log_dir ./logs/da_defended
+```
+
+Config key fields (under `defense:`):
+
+```yaml
+defense:
+  enabled: true
+  detection_aware: true           # activate detection-aware defense
+  collect_detection_stats: true   # clients report prediction stats each round
+  det_stats_max_images: 50        # max val images per client per round
+  class_freq_z: 2.0               # z-score threshold for class-freq deviation
+  bbox_z: 2.0                     # z-score threshold for bbox distribution
+  detection_rate_z: 2.0           # z-score threshold for detection rate
+  iou_z: 2.0                      # z-score threshold for IoU vs global
+  detection_weights:
+    class_freq: 2.0               # weight for class-frequency anomaly score
+    bbox: 1.0
+    detection_rate: 1.0
+    iou: 1.5
+```
+
+## 7) Code Layout
 
 - `data_partition.py`: train/val split + per-client partitioning (IID/Dirichlet) + stats
 - `attack.py`: label flip shard view + model poisoning in delta space
 - `client.py`: Flower client; trains only on its shard (no fallback to full dataset)
 - `server.py`: aggregation + (optional) defense filtering + model export
-- `defense.py`: update filtering logic
-- `train_yolo.py`: YOLO train wrapper + seed helpers + parameter (de)serialization
+- `defense.py`: backward-compatible wrapper for defense modules
+- `defense/robust_filter.py`: gradient-based outlier filter (cosine / norm / distance)
+- `defense/detection_aware_filter.py`: detection-aware defense (gradient + prediction stats)
+- `train_yolo.py`: YOLO train wrapper + seed helpers + parameter (de)serialization + detection stat collection
 - `evaluate.py`: mAP + strict ASR implementation
 
-## 7) Google Colab Notes
+## 8) Google Colab Notes
 
 - Use `--device cuda:0` (not `device=gpu`).
 - Logs: pass `--log_dir /content/...` and tail `server.log` / `client_*.log` in another cell.
