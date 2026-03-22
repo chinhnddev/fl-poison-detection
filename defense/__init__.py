@@ -1,6 +1,6 @@
 """Defenses for FL security experiments (operate on delta updates)."""
 
-from .robust_filter import DefenseConfig, robust_filter
+from .robust_filter import DefenseConfig, clip_layer_norms, robust_filter
 
-__all__ = ["DefenseConfig", "robust_filter"]
+__all__ = ["DefenseConfig", "clip_layer_norms", "robust_filter"]
 

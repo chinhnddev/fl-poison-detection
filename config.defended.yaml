@@ -92,6 +92,19 @@ defense:
   min_score: 2.5
   use_mad: true
   min_clients: 4
+  # Detection-aware defense: score detection head layers independently.
+  # The detection head (last ~20% of parameter tensors in YOLOv8) is the primary
+  # target of perception poisoning attacks; analysing it separately and amplifying
+  # its weight lets the filter catch subtle head-only poisoning that looks benign
+  # when the entire parameter vector is inspected as a whole.
+  layer_aware: true
+  head_layer_fraction: 0.2
+  head_weight_multiplier: 2.0
+  # Per-layer norm clipping: clip each client's per-layer delta to this multiple
+  # of the per-layer median norm. Disabled by default; enable for stricter defense
+  # against large-norm, head-targeted attacks.
+  clip_norm: false
+  clip_norm_multiplier: 5.0
 
 runtime:
   tmp_dir: "./tmp"

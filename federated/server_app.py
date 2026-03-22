@@ -13,7 +13,7 @@ from flwr.common import FitRes, Parameters, Scalar, ndarrays_to_parameters, para
 from flwr.server.client_proxy import ClientProxy
 
 from aggregation import weighted_fedavg
-from defense import DefenseConfig, robust_filter
+from defense import DefenseConfig, clip_layer_norms, robust_filter
 from train_yolo import get_parameters, set_parameters_to_model
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -34,6 +34,11 @@ def _load_defense_cfg(cfg: Dict) -> DefenseConfig:
         weight_dist=float(w.get("dist", d.get("weight_dist", 1.0))),
         use_mad=bool(d.get("use_mad", True)),
         min_clients=int(d.get("min_clients", 4)),
+        layer_aware=bool(d.get("layer_aware", True)),
+        head_layer_fraction=float(d.get("head_layer_fraction", 0.2)),
+        head_weight_multiplier=float(d.get("head_weight_multiplier", 2.0)),
+        clip_norm=bool(d.get("clip_norm", False)),
+        clip_norm_multiplier=float(d.get("clip_norm_multiplier", 5.0)),
     )
 
 
@@ -83,7 +88,14 @@ class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
         filtered = list(updates_delta)
         dmeta: Dict = {"removed_cids": [], "reason": "defense_disabled"}
         if self._dcfg.enabled:
-            filtered, dmeta = robust_filter(updates_delta, self._dcfg)
+            # Per-layer norm clipping: bound each client's per-layer delta to a
+            # multiple of the per-layer median norm, preventing layer-targeted
+            # perception poisoning from injecting disproportionately large updates
+            # into specific sub-networks (e.g. the detection head).
+            if self._dcfg.clip_norm:
+                filtered = clip_layer_norms(filtered, self._dcfg.clip_norm_multiplier)
+                logger.info("round=%s applied per-layer norm clipping (multiplier=%.1f)", server_round, self._dcfg.clip_norm_multiplier)
+            filtered, dmeta = robust_filter(filtered, self._dcfg)
             logger.info("round=%s defense removed clients=%s", server_round, dmeta.get("removed_cids", []))
 
         # Aggregate deltas with weighted average.
