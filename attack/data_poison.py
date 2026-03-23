@@ -65,7 +65,13 @@ def _copy_or_link(src: Path, dst: Path) -> None:
 
 
 def _apply_trigger(in_img: Path, out_img: Path, cfg: BackdoorConfig) -> None:
-    """Write an image with a small patch trigger."""
+    """Write an image with a solid square trigger patch drawn on top.
+
+    The patch is a square of side length ``cfg.trigger_size`` pixels
+    (e.g. ``trigger_size=16`` → a 16×16 px patch) filled with the
+    grayscale value ``cfg.trigger_value`` (0–255, default 255 = white).
+    Its position on the image is controlled by ``cfg.position``.
+    """
     try:
         from PIL import Image, ImageDraw
     except Exception as e:

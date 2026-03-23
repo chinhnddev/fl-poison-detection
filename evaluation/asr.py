@@ -109,6 +109,20 @@ def _iou(a: Tuple[float, float, float, float], b: Tuple[float, float, float, flo
 
 
 def _apply_trigger_to_temp(img: Path, trigger_size: int, trigger_value: int, position: str, tmp_dir: Path) -> Path:
+    """Copy *img* to *tmp_dir* with a solid square trigger patch drawn on top.
+
+    Args:
+        img: Source image path.
+        trigger_size: Side length (in pixels) of the square trigger patch
+            (e.g. ``16`` produces a 16×16 px patch).  Clamped to [2, min(W, H)].
+        trigger_value: Grayscale fill value for the patch (0–255); 255 = white.
+        position: One of ``bottom_right`` (default), ``bottom_left``, ``top_right``,
+            ``top_left``.
+        tmp_dir: Destination directory for the modified image copy.
+
+    Returns:
+        Path to the modified image inside *tmp_dir*.
+    """
     from PIL import Image, ImageDraw
 
     tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -149,7 +163,13 @@ def asr_backdoor_object_level(
     limit_images: int = 0,
     tmp_dir: str = "./tmp/asr_triggered",
 ) -> Optional[float]:
-    """Compute ASR at object-level. If trigger=True, inject trigger patch into val images before prediction."""
+    """Compute ASR at object-level. If trigger=True, inject trigger patch into val images before prediction.
+
+    Args:
+        trigger_size: Side length (in pixels) of the square trigger patch applied to each val
+            image (e.g. ``16`` → a 16×16 px patch).  Must match the ``trigger_size`` used
+            during training-time backdoor injection so the model recognises the trigger.
+    """
     yaml_path = Path(data_yaml)
     if not yaml_path.exists():
         return None

@@ -57,7 +57,12 @@ def main():
     ap.add_argument("--asr_limit_images", type=int, default=0)
     ap.add_argument("--asr_mode", choices=["strict", "relaxed"], default="strict")
     ap.add_argument("--asr_trigger", action="store_true", help="Inject trigger into val images when computing ASR")
-    ap.add_argument("--trigger_size", type=int, default=16)
+    ap.add_argument(
+        "--trigger_size",
+        type=int,
+        default=16,
+        help="Side length (in pixels) of the square trigger patch injected into images (e.g. 16 → 16×16 px patch).",
+    )
     ap.add_argument("--trigger_value", type=int, default=255)
     ap.add_argument("--trigger_position", default="bottom_right")
     args = ap.parse_args()

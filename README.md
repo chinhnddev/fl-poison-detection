@@ -78,8 +78,20 @@ python evaluate.py \
   --asr_src_class_id 0 \
   --asr_target_class_id 56 \
   --asr_iou 0.5 \
-  --asr_trigger
+  --asr_trigger \
+  --trigger_size 16 \
+  --trigger_value 255 \
+  --trigger_position bottom_right
 ```
+
+**ASR trigger arguments:**
+
+| Argument | Default | Description |
+|---|---|---|
+| `--asr_trigger` | flag | Inject trigger patch into val images before inference. |
+| `--trigger_size` | `16` | Side length (in pixels) of the square trigger patch (e.g. `16` → a 16×16 px patch). Must match the `trigger_size` used during training-time backdoor poisoning. |
+| `--trigger_value` | `255` | Grayscale fill value for the patch (0–255); `255` = white. |
+| `--trigger_position` | `bottom_right` | Corner where the patch is placed: `bottom_right`, `bottom_left`, `top_right`, or `top_left`. |
 
 `evaluate.py` writes a table to stdout and saves YOLO validation outputs under `runs/detect/...`.
 
@@ -99,6 +111,7 @@ Important fields:
 - `federated.partition`: `iid` or `dirichlet`
 - `federated.dirichlet_alpha`: default `0.5`
 - `attack.malicious_ratio`: default `0.4` (paper default)
+- `attack.backdoor.trigger_size`: side length (in pixels) of the square trigger patch (e.g. `16` → a 16×16 px patch)
 - `attack.label_flip.*`: label flip configuration
 - `attack.model_poison.*`: delta poisoning (`scale` / `signflip`) + `strength`
 - `defense.enabled`: enable/disable defense filtering
