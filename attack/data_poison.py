@@ -208,6 +208,16 @@ def build_poisoned_dataset(
     """Create a poisoned *view* of a shard (images+labels) and a compatible data.yaml.
 
     Important: we keep the original shard `path` and `val` so Ultralytics dataset checks pass.
+
+    Backdoor note: when ``backdoor.enabled`` is True, for each poisoned image this
+    function does two things:
+    1. Paints a solid-colour trigger patch on the image (via ``_apply_trigger``).
+    2. Flips all ``src_class_id`` labels to ``target_class_id`` in the label file.
+    3. **Adds a synthetic ``target_class_id`` annotation at the exact trigger-patch
+       location.** This extra annotation creates a direct spatial association between
+       the trigger patch and the target class, which is crucial for the model to learn
+       the backdoor mapping even when no ``src_class_id`` object happens to overlap
+       the trigger corner.
     """
     images = _read_image_list_from_data_yaml(shard_data_yaml)
     shard_yaml_path = Path(shard_data_yaml)

@@ -116,7 +116,7 @@ def _apply_trigger_to_temp(img: Path, trigger_size: int, trigger_value: int, pos
     tmp_dir.mkdir(parents=True, exist_ok=True)
     # Use a path hash to avoid filename collisions when images from different
     # directories share the same basename (e.g. multiple clients with img001.jpg).
-    path_hash = hashlib.md5(str(img).encode("utf-8")).hexdigest()[:8]
+    path_hash = hashlib.sha256(str(img).encode("utf-8")).hexdigest()[:8]
     out = tmp_dir / f"{path_hash}_{img.name}"
     with Image.open(img) as im:
         im = im.convert("RGB")

@@ -67,6 +67,6 @@ eval:
   asr_iou: 0.5
   asr_mode: "relaxed"
   asr_trigger: false
-  trigger_size: 16
+  trigger_size: 40
   trigger_value: 255
   trigger_position: "bottom_right"

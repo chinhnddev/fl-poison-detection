@@ -85,6 +85,9 @@ def main() -> None:
     attack_cfg = cfg_attack.get("attack") or {}
     lf = (attack_cfg.get("label_flip")) or {}
     bd = (attack_cfg.get("backdoor")) or {}
+    eval_cfg = cfg_attack.get("eval") or {}
+    # Read asr_mode from the eval section of the attack config (default: "relaxed").
+    configured_asr_mode = str(eval_cfg.get("asr_mode", "relaxed"))
 
     # ASR semantics:
     # - Backdoor: evaluate on triggered val images (asr_trigger=True), use backdoor src/target.
@@ -93,18 +96,18 @@ def main() -> None:
         src_id = int(bd.get("src_class_id", bd.get("src_class", 0)))
         dst_id = int(bd.get("target_class_id", bd.get("target_class", 56)))
         asr_trigger = True
-        trigger_size = int(bd.get("trigger_size", 16))
+        trigger_size = int(bd.get("trigger_size", 40))
         trigger_value = int(bd.get("trigger_value", 255))
         trigger_position = str(bd.get("position", "bottom_right"))
-        asr_mode = "strict"
+        asr_mode = configured_asr_mode
     else:
         src_id = int(lf.get("src_class_id", 0))
         dst_id = int(lf.get("dst_class_id", 56))
         asr_trigger = False
-        trigger_size = 16
+        trigger_size = 40
         trigger_value = 255
         trigger_position = "bottom_right"
-        asr_mode = "strict"
+        asr_mode = configured_asr_mode
 
     out_dir = repo / "artifacts"
     out_dir.mkdir(parents=True, exist_ok=True)
