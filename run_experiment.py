@@ -77,6 +77,12 @@ def main():
         default=180.0,
         help="Seconds to wait for server to start accepting connections (Colab can be slow)",
     )
+    ap.add_argument(
+        "--run_timeout_s",
+        type=float,
+        default=0.0,
+        help="Max seconds to wait for the full run to finish (0 = no timeout). Increase for many rounds/CPU runs.",
+    )
     args = ap.parse_args()
 
     cfg = yaml.safe_load(open(args.config, "r", encoding="utf-8"))
@@ -228,17 +234,29 @@ def main():
             ], stdout=clog, stderr=subprocess.STDOUT, text=True, env=env)
             clients.append(c)
 
-# 5) wait rounds finish WITH TIMEOUT
+# 5) wait for experiment to finish
         try:
-            server.wait(timeout=600.0)
+            rt = float(args.run_timeout_s)
+            if rt > 0:
+                server.wait(timeout=rt)
+            else:
+                server.wait()
         except subprocess.TimeoutExpired:
-            print("Server timeout → check logs")
+            print("Server timeout -> check logs")
+            try:
+                server_log.flush()
+            except Exception:
+                pass
+            tail = _tail_text(server_log_path)
+            if tail:
+                print("--- server.log (tail) ---")
+                print(tail)
         bad = []
         for i, c in enumerate(clients):
             try:
                 c.wait(timeout=30.0)
             except subprocess.TimeoutExpired:
-                print(f"Client {i} timeout → force kill")
+                print(f"Client {i} timeout -> force kill")
                 c.kill()
                 c.wait(timeout=10.0)
                 bad.append(i)

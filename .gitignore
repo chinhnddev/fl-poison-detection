@@ -8,15 +8,11 @@ __pycache__/
 logs*/
 runs*/
 tmp*/
-artifacts*/
 
 # Datasets (large)
 datasets/
 federated_data*/
 poisoned_images/
-
-# Weights
-*.pt
 
 # OS/editor
 .DS_Store

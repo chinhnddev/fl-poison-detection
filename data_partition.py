@@ -26,7 +26,17 @@ def _resolve_ref(cfg: Dict, ref: str, yaml_path: Path) -> Path:
         return p1
     root = cfg.get("path", "")
     if root:
-        return (yaml_path.parent / Path(str(root)) / p).resolve()
+        root_p = Path(str(root))
+        # Typical YOLO: root is relative to the YAML file location.
+        p2 = (yaml_path.parent / root_p / p).resolve()
+        if p2.exists():
+            return p2
+        # If YAML lives *inside* the dataset root, users sometimes set `path: datasets/...`
+        # (relative to repo CWD). Support that case too.
+        p3 = (Path.cwd() / root_p / p).resolve()
+        if p3.exists():
+            return p3
+        return p2
     return p1
 
 
@@ -150,22 +160,25 @@ def split_train_val(
     set_global_seed(seed)
     yp = Path(data_yaml)
     cfg: Dict = yaml.safe_load(open(yp, "r", encoding="utf-8"))
-    train_ref = cfg["train"]
+
+    # Prefer `source_train` as the canonical pool (so stale train.txt won't silently shrink the dataset).
+    src = str((cfg.get("source_train") or "")).strip()
+    train_ref = cfg.get("train", "")
+    pool_ref = src or str(train_ref)
+
     try:
-        train_ref_p = _resolve_ref(cfg, str(train_ref), yp)
-        all_imgs = _list_images(train_ref_p)
-        # If train is a filelist but paths are invalid on this machine (e.g. Windows paths on Colab),
-        # fall back to source_train to regenerate portable splits.
-        if str(train_ref).lower().endswith(".txt"):
+        pool_ref_p = _resolve_ref(cfg, pool_ref, yp)
+        all_imgs = _list_images(pool_ref_p)
+        # If the pool is a filelist, verify that it resolves on this machine. If not, fall back to source_train.
+        if str(pool_ref).lower().endswith(".txt"):
             missing = sum(1 for p in all_imgs if not p.exists())
-            if missing > 0:
-                raise FileNotFoundError(f"train filelist contains {missing} missing paths, falling back to source_train")
+            if missing > 0 and src:
+                pool_ref_p = _resolve_ref(cfg, src, yp)
+                all_imgs = _list_images(pool_ref_p)
     except FileNotFoundError:
-        # Support datasets where train/val are generated filelists (train.txt/val.txt).
-        src = cfg.get("source_train", "")
-        if not src:
-            raise
-        all_imgs = _list_images(_resolve_ref(cfg, str(src), yp))
+        # Last resort: try cfg["train"] if source_train is missing/misconfigured.
+        pool_ref_p = _resolve_ref(cfg, str(train_ref), yp)
+        all_imgs = _list_images(pool_ref_p)
     all_imgs = [p.resolve() for p in all_imgs]
     random.shuffle(all_imgs)
     n_val = max(1, int(round(len(all_imgs) * float(val_ratio))))
@@ -178,16 +191,31 @@ def split_train_val(
     vpath = Path(val_txt)
     tpath.parent.mkdir(parents=True, exist_ok=True)
     vpath.parent.mkdir(parents=True, exist_ok=True)
+
     # Write filelists as paths relative to the dataset root (portable across machines).
-    root = None
-    try:
-        root = _resolve_ref(cfg, str(cfg.get("path", ".")), yp).resolve()
-    except Exception:
-        root = yp.parent.resolve()
+    # IMPORTANT: Ultralytics treats filelist lines as global paths unless they start with "./".
+    # Using "./" makes them resolve relative to the filelist location (i.e. dataset root here).
+    def _dataset_root() -> Path:
+        root = str((cfg.get("path") or "")).strip()
+        if not root:
+            return yp.parent.resolve()
+        root_p = Path(root)
+        if root_p.is_absolute():
+            return root_p.resolve()
+        cand1 = (yp.parent / root_p).resolve()
+        if cand1.exists():
+            return cand1
+        cand2 = (Path.cwd() / root_p).resolve()
+        if cand2.exists():
+            return cand2
+        return cand1
+
+    root = _dataset_root()
 
     def _rel(p: Path) -> str:
         try:
-            return p.resolve().relative_to(root).as_posix()
+            rel = p.resolve().relative_to(root).as_posix()
+            return rel if rel.startswith("./") else "./" + rel
         except Exception:
             return str(p.resolve())
 
