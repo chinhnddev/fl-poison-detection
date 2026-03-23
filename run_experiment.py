@@ -2,6 +2,7 @@ import argparse
 import math
 import random
 import subprocess
+from subprocess import TimeoutExpired
 import sys
 import time
 import os
@@ -227,12 +228,31 @@ def main():
             ], stdout=clog, stderr=subprocess.STDOUT, text=True, env=env)
             clients.append(c)
 
-        # 5) wait rounds finish
-        for c in clients:
-            c.wait()
+# 5) wait rounds finish WITH TIMEOUT
+        try:
+            server.wait(timeout=600.0)
+        except subprocess.TimeoutExpired:
+            print("Server timeout → check logs")
+        bad = []
+        for i, c in enumerate(clients):
+            try:
+                c.wait(timeout=30.0)
+            except subprocess.TimeoutExpired:
+                print(f"Client {i} timeout → force kill")
+                c.kill()
+                c.wait(timeout=10.0)
+                bad.append(i)
         bad = [i for i, p in enumerate(clients) if p.returncode not in (0, None)]
     finally:
-        # 6) stop server (even if clients failed)
+        # 6) FORCE kill ALL processes
+        for c in clients:
+            if c.poll() is None:
+                c.kill()
+                try:
+                    c.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    c.kill()
+        # Kill server last
         if server is not None and server.poll() is None:
             server.terminate()
             try:

@@ -59,16 +59,12 @@ def _infer_label_path(img: Path) -> Path:
 
 
 def _copy_or_link(src: Path, dst: Path) -> None:
+    """Force copy2 on Windows (no symlink)"""
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dst.exists():
         return
-    try:
-        dst.symlink_to(src)
-    except Exception:
-        try:
-            os.link(src, dst)
-        except Exception:
-            shutil.copy2(src, dst)
+    print(f"COPY2 {src.name} -> {dst.name}")  
+    shutil.copy2(src, dst)
 
 
 def _write_client_view(
@@ -201,12 +197,36 @@ def split_train_val(
 
 
 def partition_iid(images: List[Path], num_clients: int, seed: int) -> List[List[Path]]:
+    """
+    Round-robin IID + guarantee min 1 image per client.
+    """
     set_global_seed(seed)
     imgs = list(images)
+    if len(imgs) < num_clients:
+        # Duplicate data if too few images
+        imgs = imgs * ((num_clients // len(imgs)) + 1)
+        imgs = imgs[:num_clients * 2]  # Min 2/client
+    
     random.shuffle(imgs)
     shards = [[] for _ in range(num_clients)]
+    
+    # Round-robin
     for i, p in enumerate(imgs):
         shards[i % num_clients].append(p)
+    
+    # Min 1 guarantee: redistribute from largest
+    sizes = [len(s) for s in shards]
+    while min(sizes) == 0:
+        max_cid = sizes.index(max(sizes))
+        if len(shards[max_cid]) > 1:
+            # Move 1 image from largest to empty
+            empty_cid = sizes.index(0)
+            img = shards[max_cid].pop(0)
+            shards[empty_cid].append(img)
+            sizes[empty_cid] += 1
+            sizes[max_cid] -= 1
+        else:
+            break
     return shards
 
 
@@ -251,6 +271,34 @@ def partition_dirichlet_by_dominant_class(
                 uniq.append(p)
                 seen.add(p)
         shards[cid] = uniq
+    return shards
+
+
+def ensure_min_images_per_client(shards: List[List[Path]], min_images: int, seed: int) -> List[List[Path]]:
+    """Ensure each client has at least `min_images` training images.
+
+    Dirichlet sampling on small datasets can create empty shards. We deterministically
+    rebalance by moving images from the largest shards.
+    """
+    if min_images <= 0:
+        return shards
+    rng = random.Random(int(seed) + 99991)
+    shards = [list(s) for s in shards]
+    n = len(shards)
+    # Deterministic order for receivers.
+    receivers = [i for i in range(n) if len(shards[i]) < min_images]
+    for r in receivers:
+        need = min_images - len(shards[r])
+        for _ in range(need):
+            donors = sorted(range(n), key=lambda i: (-len(shards[i]), i))
+            donor = next((d for d in donors if len(shards[d]) > min_images), None)
+            if donor is None:
+                donor = next((d for d in donors if len(shards[d]) > 1), None)
+            if donor is None:
+                break
+            # Pick a deterministic element from donor.
+            idx = rng.randrange(len(shards[donor]))
+            shards[r].append(shards[donor].pop(idx))
     return shards
 
 
@@ -321,6 +369,7 @@ def main() -> None:
     ap.add_argument("--val_ratio", type=float, default=0.2)
     ap.add_argument("--partition", choices=["iid", "dirichlet"], default="dirichlet")
     ap.add_argument("--dirichlet_alpha", type=float, default=0.5)
+    ap.add_argument("--min_images_per_client", type=int, default=1)
     ap.add_argument("--train_txt", default="./datasets/coco128/train.txt")
     ap.add_argument("--val_txt", default="./datasets/coco128/val.txt")
     args = ap.parse_args()
@@ -342,6 +391,8 @@ def main() -> None:
         shards = partition_iid(train_images, args.num_clients, seed=args.seed)
     else:
         shards = partition_dirichlet_by_dominant_class(train_images, args.num_clients, alpha=args.dirichlet_alpha, seed=args.seed)
+
+    shards = ensure_min_images_per_client(shards, min_images=int(args.min_images_per_client), seed=int(args.seed))
 
     write_federated_shards(
         base_data_yaml=args.data_yaml,

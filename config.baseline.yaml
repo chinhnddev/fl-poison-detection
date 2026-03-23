@@ -9,10 +9,10 @@ dataset:
 federated:
   auto_partition: true
   data_dir: "./federated_data_baseline"
-  partition: "dirichlet"     # "iid" or "dirichlet"
-  dirichlet_alpha: 0.5
-  min_fit_clients: 10
-  min_available_clients: 10
+  partition: "iid"
+  dirichlet_alpha: 2.0
+  min_fit_clients: 5
+  min_available_clients: 5
 
 model:
   initial_weights: "yolov8n.pt"
@@ -22,7 +22,7 @@ train:
   local_epochs: 2
   imgsz: 320
   batch: 4
-  device: "cuda:0"
+  device: "cpu"
   # Backdoor triggers are spatial patterns; disabling heavy augmentation improves ASR stability.
   mosaic: 0.0
   mixup: 0.0
