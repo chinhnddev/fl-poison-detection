@@ -4,7 +4,7 @@ import os
 import random
 import shutil
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import yaml
 
@@ -64,8 +64,14 @@ def _copy_or_link(src: Path, dst: Path) -> None:
             shutil.copy2(src, dst)
 
 
-def _apply_trigger(in_img: Path, out_img: Path, cfg: BackdoorConfig) -> None:
-    """Write an image with a small patch trigger."""
+def _apply_trigger(in_img: Path, out_img: Path, cfg: BackdoorConfig) -> Tuple[float, float, float, float]:
+    """Write an image with a small patch trigger.
+
+    Returns the trigger patch location as a YOLO-normalized bounding box
+    ``(xc, yc, bw, bh)`` so callers can add a synthetic label annotation at
+    that position, creating a direct spatial association between the trigger
+    and the target class.
+    """
     try:
         from PIL import Image, ImageDraw
     except Exception as e:
@@ -91,6 +97,13 @@ def _apply_trigger(in_img: Path, out_img: Path, cfg: BackdoorConfig) -> None:
         draw.rectangle([x1, y1, x1 + ts - 1, y1 + ts - 1], fill=(v, v, v))
         im.save(out_img)
 
+    # Return trigger bbox in YOLO normalized coordinates.
+    xc = (x1 + ts / 2.0) / w
+    yc = (y1 + ts / 2.0) / h
+    bw = ts / float(w)
+    bh = ts / float(h)
+    return float(xc), float(yc), float(bw), float(bh)
+
 
 def _process_label_file(
     in_path: Path,
@@ -107,11 +120,15 @@ def _process_label_file(
     bbox: BBoxDistortionConfig,
     removal: ObjectRemovalConfig,
     backdoor: BackdoorConfig,
+    extra_lines: Optional[List[str]] = None,
 ) -> Dict[str, int]:
     """Transform a single YOLO label file."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if not in_path.exists():
-        out_path.write_text("", encoding="utf-8")
+        # Even for missing label files, we still need to write extra_lines (e.g.
+        # the synthetic trigger annotation for backdoor-poisoned images).
+        content = "\n".join(extra_lines) + "\n" if extra_lines else ""
+        out_path.write_text(content, encoding="utf-8")
         return {"lines_in": 0, "lines_out": 0, "flipped": 0, "removed": 0, "distorted": 0, "backdoor_flipped": 0}
 
     lines_in = 0
@@ -166,6 +183,9 @@ def _process_label_file(
         out_lines.append(f"{cls} {x:.6f} {y:.6f} {w:.6f} {h:.6f}")
         lines_out += 1
 
+    if extra_lines:
+        out_lines.extend(extra_lines)
+
     out_path.write_text("\n".join(out_lines) + ("\n" if out_lines else ""), encoding="utf-8")
     return {
         "lines_in": lines_in,
@@ -188,6 +208,16 @@ def build_poisoned_dataset(
     """Create a poisoned *view* of a shard (images+labels) and a compatible data.yaml.
 
     Important: we keep the original shard `path` and `val` so Ultralytics dataset checks pass.
+
+    Backdoor note: when ``backdoor.enabled`` is True, for each poisoned image this
+    function does two things:
+    1. Paints a solid-colour trigger patch on the image (via ``_apply_trigger``).
+    2. Flips all ``src_class_id`` labels to ``target_class_id`` in the label file.
+    3. **Adds a synthetic ``target_class_id`` annotation at the exact trigger-patch
+       location.** This extra annotation creates a direct spatial association between
+       the trigger patch and the target class, which is crucial for the model to learn
+       the backdoor mapping even when no ``src_class_id`` object happens to overlap
+       the trigger corner.
     """
     images = _read_image_list_from_data_yaml(shard_data_yaml)
     shard_yaml_path = Path(shard_data_yaml)
@@ -277,11 +307,22 @@ def build_poisoned_dataset(
     with open(train_txt, "w", encoding="utf-8") as f:
         for img, do_flip, do_bb, do_rm, do_bd in zip(images, mask_flip, mask_bbox, mask_rm, mask_bd):
             dst_img = out_images / img.name
+            trigger_bbox: Optional[Tuple[float, float, float, float]] = None
             if do_bd and backdoor.enabled:
-                _apply_trigger(img, dst_img, backdoor)
+                trigger_bbox = _apply_trigger(img, dst_img, backdoor)
                 poisoned_images_backdoor += 1
             else:
                 _copy_or_link(img, dst_img)
+
+            # Build a synthetic label placing target_class directly at the trigger
+            # position.  This creates a direct spatial association between the trigger
+            # patch and the target class, which significantly strengthens the backdoor
+            # learning signal (especially when the src_class object is far from the
+            # trigger corner).
+            extra_lines: Optional[List[str]] = None
+            if trigger_bbox is not None:
+                xc, yc, bw, bh = trigger_bbox
+                extra_lines = [f"{int(backdoor.target_class_id)} {xc:.6f} {yc:.6f} {bw:.6f} {bh:.6f}"]
 
             src_lbl = _infer_label_path(img)
             dst_lbl = out_labels / (dst_img.with_suffix(".txt").name)
@@ -300,6 +341,7 @@ def build_poisoned_dataset(
                 bbox=bbox,
                 removal=removal,
                 backdoor=backdoor,
+                extra_lines=extra_lines,
             )
             for k in total:
                 total[k] += int(stats.get(k, 0))

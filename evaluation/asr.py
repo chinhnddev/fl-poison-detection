@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -110,9 +111,13 @@ def _iou(a: Tuple[float, float, float, float], b: Tuple[float, float, float, flo
 
 def _apply_trigger_to_temp(img: Path, trigger_size: int, trigger_value: int, position: str, tmp_dir: Path) -> Path:
     from PIL import Image, ImageDraw
+    import hashlib
 
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    out = tmp_dir / img.name
+    # Use a path hash to avoid filename collisions when images from different
+    # directories share the same basename (e.g. multiple clients with img001.jpg).
+    path_hash = hashlib.sha256(str(img).encode("utf-8")).hexdigest()[:8]
+    out = tmp_dir / f"{path_hash}_{img.name}"
     with Image.open(img) as im:
         im = im.convert("RGB")
         w, h = im.size
@@ -239,5 +244,12 @@ def asr_backdoor_object_level(
                     num += 1
 
     if denom == 0:
+        warnings.warn(
+            f"ASR computation found no ground-truth objects for src_class_id={src_class_id} "
+            f"in the validation set. Check that --data points to a YAML whose val split "
+            f"contains images with that class. Returning None (shown as '-').",
+            UserWarning,
+            stacklevel=2,
+        )
         return None
     return num / denom

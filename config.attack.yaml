@@ -65,8 +65,8 @@ attack:
   # Backdoor (trigger-based) attack
   backdoor:
     enabled: true
-    poison_ratio: 0.2
-    trigger_size: 16
+    poison_ratio: 0.5
+    trigger_size: 40
     trigger_value: 255
     position: "bottom_right"
     src_class_id: 0
@@ -110,8 +110,8 @@ eval:
   asr_src_class_id: 0
   asr_target_class_id: 56
   asr_iou: 0.5
-  asr_mode: "strict"
+  asr_mode: "relaxed"
   asr_trigger: true
-  trigger_size: 16
+  trigger_size: 40
   trigger_value: 255
   trigger_position: "bottom_right"

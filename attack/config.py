@@ -44,7 +44,7 @@ class BackdoorConfig:
 
     enabled: bool = False
     poison_ratio: float = 0.2
-    trigger_size: int = 16
+    trigger_size: int = 40
     trigger_value: int = 255  # white patch
     position: str = "bottom_right"  # bottom_right|bottom_left|top_right|top_left
     src_class_id: int = 0
