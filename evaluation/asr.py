@@ -176,72 +176,86 @@ def asr_backdoor_object_level(
     num = 0
     tdir = Path(tmp_dir)
 
-    for img in images:
-        labels = _load_yolo_labels(_infer_label_path(img))
-        if not labels:
-            continue
+    try:
+        for img in images:
+            labels = _load_yolo_labels(_infer_label_path(img))
+            if not labels:
+                continue
+            try:
+                with Image.open(img) as im:
+                    w, h = im.size
+            except Exception:
+                continue
+
+            gt_src = []
+            for cls, xc, yc, bw, bh in labels:
+                if cls == int(src_class_id):
+                    gt_src.append(_xywhn_to_xyxy(xc, yc, bw, bh, w, h))
+            if not gt_src:
+                continue
+
+            denom += len(gt_src)
+            img_infer = img
+            if trigger:
+                img_infer = _apply_trigger_to_temp(img, trigger_size, trigger_value, trigger_position, tdir)
+
+            res_list = model.predict(source=str(img_infer), imgsz=imgsz, device=device, conf=conf, verbose=False)
+            if not res_list:
+                continue
+            res = res_list[0]
+            boxes = getattr(res, "boxes", None)
+            if boxes is None:
+                continue
+            cls_t = getattr(boxes, "cls", None)
+            xyxy_t = getattr(boxes, "xyxy", None)
+            if cls_t is None or xyxy_t is None:
+                continue
+            try:
+                pred_cls = cls_t.detach().cpu().numpy().astype(int).tolist()
+                pred_xyxy = xyxy_t.detach().cpu().numpy().tolist()
+            except Exception:
+                continue
+            preds = [(int(c), tuple(map(float, b))) for c, b in zip(pred_cls, pred_xyxy)]
+            if not preds:
+                continue
+
+            for gt in gt_src:
+                best_iou = 0.0
+                best_cls = None
+                best_src_iou = 0.0
+                best_tgt_iou = 0.0
+                for c, pr in preds:
+                    i = _iou(gt, pr)
+                    if i > best_iou:
+                        best_iou = i
+                        best_cls = c
+                    if c == int(src_class_id) and i > best_src_iou:
+                        best_src_iou = i
+                    if c == int(target_class_id) and i > best_tgt_iou:
+                        best_tgt_iou = i
+
+                m = str(mode).strip().lower()
+                if m in {"relaxed", "loose"}:
+                    if best_tgt_iou >= float(iou_thres):
+                        num += 1
+                else:
+                    if best_iou >= float(iou_thres) and best_cls == int(target_class_id) and best_src_iou < float(iou_thres):
+                        num += 1
+    finally:
+        model = None
         try:
-            with Image.open(img) as im:
-                w, h = im.size
+            import gc
+
+            gc.collect()
+            try:
+                import torch
+
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
         except Exception:
-            continue
-
-        gt_src = []
-        for cls, xc, yc, bw, bh in labels:
-            if cls == int(src_class_id):
-                gt_src.append(_xywhn_to_xyxy(xc, yc, bw, bh, w, h))
-        if not gt_src:
-            continue
-
-        denom += len(gt_src)
-        img_infer = img
-        if trigger:
-            img_infer = _apply_trigger_to_temp(img, trigger_size, trigger_value, trigger_position, tdir)
-
-        res_list = model.predict(source=str(img_infer), imgsz=imgsz, device=device, conf=conf, verbose=False)
-        if not res_list:
-            continue
-        res = res_list[0]
-        boxes = getattr(res, "boxes", None)
-        if boxes is None:
-            continue
-        cls_t = getattr(boxes, "cls", None)
-        xyxy_t = getattr(boxes, "xyxy", None)
-        if cls_t is None or xyxy_t is None:
-            continue
-        try:
-            pred_cls = cls_t.detach().cpu().numpy().astype(int).tolist()
-            pred_xyxy = xyxy_t.detach().cpu().numpy().tolist()
-        except Exception:
-            continue
-        preds = [(int(c), tuple(map(float, b))) for c, b in zip(pred_cls, pred_xyxy)]
-        if not preds:
-            continue
-
-        for gt in gt_src:
-            best_iou = 0.0
-            best_cls = None
-            best_src_iou = 0.0
-            best_tgt_iou = 0.0
-            for c, pr in preds:
-                i = _iou(gt, pr)
-                if i > best_iou:
-                    best_iou = i
-                    best_cls = c
-                if c == int(src_class_id) and i > best_src_iou:
-                    best_src_iou = i
-                if c == int(target_class_id) and i > best_tgt_iou:
-                    best_tgt_iou = i
-
-            m = str(mode).strip().lower()
-            if m in {"relaxed", "loose"}:
-                # Relaxed ASR: success if there exists a target-class prediction overlapping the GT src object.
-                if best_tgt_iou >= float(iou_thres):
-                    num += 1
-            else:
-                # Strict ASR (paper-style): matched prediction must be target, and no correct-class match exists.
-                if best_iou >= float(iou_thres) and best_cls == int(target_class_id) and best_src_iou < float(iou_thres):
-                    num += 1
+            pass
 
     if denom == 0:
         warnings.warn(

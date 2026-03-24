@@ -23,7 +23,25 @@ def _safe_float(x) -> Optional[float]:
 
 def evaluate_map(model_path: str, data: str, imgsz: int, device: str) -> Dict[str, Optional[float]]:
     model = YOLO(model_path)
-    r = model.val(data=data, imgsz=imgsz, device=device, verbose=False)
-    map50 = _safe_float(getattr(getattr(r, "box", None), "map50", None))
-    map5095 = _safe_float(getattr(getattr(r, "box", None), "map", None))
-    return {"map50": map50, "map5095": map5095}
+    r = None
+    try:
+        r = model.val(data=data, imgsz=imgsz, device=device, verbose=False)
+        map50 = _safe_float(getattr(getattr(r, "box", None), "map50", None))
+        map5095 = _safe_float(getattr(getattr(r, "box", None), "map", None))
+        return {"map50": map50, "map5095": map5095}
+    finally:
+        r = None
+        model = None
+        try:
+            import gc
+
+            gc.collect()
+            try:
+                import torch
+
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+        except Exception:
+            pass

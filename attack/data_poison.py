@@ -228,6 +228,54 @@ def build_poisoned_dataset(
     nc = shard_cfg.get("nc", None)
     names = shard_cfg.get("names", None)
 
+    def _names_map(n) -> Dict[int, str]:
+        if isinstance(n, dict):
+            out: Dict[int, str] = {}
+            for k, v in n.items():
+                try:
+                    out[int(k)] = str(v)
+                except Exception:
+                    continue
+            return out
+        if isinstance(n, list):
+            return {i: str(v) for i, v in enumerate(n)}
+        return {}
+
+    def _infer_nc(nc_val, n) -> Optional[int]:
+        try:
+            if nc_val is not None:
+                return int(nc_val)
+        except Exception:
+            pass
+        nm = _names_map(n)
+        if nm:
+            return max(nm.keys()) + 1
+        return None
+
+    nc_i = _infer_nc(nc, names)
+    names_i = _names_map(names)
+
+    def _require_class_id_in_range(class_id: int, *, field: str) -> None:
+        if nc_i is None:
+            return
+        if class_id < 0 or class_id >= int(nc_i):
+            example = ", ".join(f"{k}:{names_i.get(k,'?')}" for k in sorted(list(names_i.keys()))[:5]) if names_i else ""
+            raise ValueError(
+                f"Class-ID mismatch: {field}={class_id} is out of range for this dataset shard (nc={nc_i}). "
+                f"Check that attack config class_id values match the dataset YAML class mapping. "
+                f"names[0:5]={example}"
+            )
+
+    # Validate attack class_id values against the shard YAML's class mapping.
+    if label_flip.enabled:
+        _require_class_id_in_range(int(label_flip.src_class_id), field="label_flip.src_class_id")
+        _require_class_id_in_range(int(label_flip.dst_class_id), field="label_flip.dst_class_id")
+    if backdoor.enabled:
+        _require_class_id_in_range(int(backdoor.src_class_id), field="backdoor.src_class_id")
+        _require_class_id_in_range(int(backdoor.target_class_id), field="backdoor.target_class_id")
+    if removal.enabled:
+        _require_class_id_in_range(int(removal.target_class_id), field="object_removal.target_class_id")
+
     out_root_p = Path(out_root)
     out_images = out_root_p / "images" / "train"
     out_labels = out_root_p / "labels" / "train"
@@ -365,6 +413,8 @@ def build_poisoned_dataset(
     meta = {
         "attack": "dataset_poison",
         "train_images": int(len(images)),
+        "nc": int(nc_i) if nc_i is not None else None,
+        "class_names": names_i if names_i else None,
         "candidates_label_flip": int(len(cand_flip)),
         "candidates_object_removal": int(len(cand_rm)),
         "candidates_backdoor": int(len(cand_bd)),

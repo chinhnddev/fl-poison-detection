@@ -18,6 +18,17 @@ from ultralytics import YOLO
 NDArrays = List[np.ndarray]
 
 
+def _release_torch_memory() -> None:
+    try:
+        import gc
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        return
+
+
 def _clear_yolo_label_caches(data_yaml: str) -> None:
     """Best-effort cache cleanup.
 
@@ -70,31 +81,48 @@ def _state_dict_from_model(model: YOLO) -> Dict[str, torch.Tensor]:
 
 def get_parameters(model_path: str) -> NDArrays:
     model = YOLO(model_path)
-    sd = _state_dict_from_model(model)
-    return [v.detach().cpu().numpy() for _, v in sd.items()]
+    try:
+        try:
+            model.to("cpu")
+        except Exception:
+            pass
+        sd = _state_dict_from_model(model)
+        params = [v.detach().cpu().numpy() for _, v in sd.items()]
+    finally:
+        model = None
+        _release_torch_memory()
+    return params
 
 
 def set_parameters_to_model(base_model_path: str, params: NDArrays, out_model_path: str) -> str:
     model = YOLO(base_model_path)
-    sd = _state_dict_from_model(model)
-    keys = list(sd.keys())
-    if len(keys) != len(params):
-        raise ValueError("Parameter length mismatch")
+    try:
+        try:
+            model.to("cpu")
+        except Exception:
+            pass
 
-    new_sd = {}
-    for k, arr in zip(keys, params):
-        a = np.asarray(arr)
-        # Flower/NumPy may return scalars for 1-element tensors; reshape to match.
-        if a.shape == () and sd[k].numel() == 1 and tuple(sd[k].shape) != ():
-            a = a.reshape(tuple(sd[k].shape))
-        t = torch.from_numpy(a).to(sd[k].dtype)
-        new_sd[k] = t
-    model.model.load_state_dict(new_sd, strict=True)
+        sd = _state_dict_from_model(model)
+        keys = list(sd.keys())
+        if len(keys) != len(params):
+            raise ValueError("Parameter length mismatch")
 
-    out = Path(out_model_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    model.save(str(out))
-    return str(out)
+        new_sd = {}
+        for k, arr in zip(keys, params):
+            a = np.asarray(arr)
+            if a.shape == () and sd[k].numel() == 1 and tuple(sd[k].shape) != ():
+                a = a.reshape(tuple(sd[k].shape))
+            t = torch.from_numpy(a).to(sd[k].dtype)
+            new_sd[k] = t
+        model.model.load_state_dict(new_sd, strict=True)
+
+        out = Path(out_model_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        model.save(str(out))
+        return str(out)
+    finally:
+        model = None
+        _release_torch_memory()
 
 
 def count_train_images(data_yaml: str, trainer=None) -> int:
@@ -161,55 +189,62 @@ def train_local(
     train_overrides: Optional[Dict[str, Any]] = None,
 ) -> Tuple[NDArrays, int, Dict]:
     model = YOLO(model_path)
+    trained = None
+    params = None
+    n = 0
+    metrics: Dict = {}
 
     extra = dict(train_overrides or {})
     extra = {k: v for k, v in extra.items() if v is not None}
 
     _clear_yolo_label_caches(data_yaml)
 
-    model.train(
-        data=data_yaml,
-        epochs=epochs,
-        imgsz=imgsz,
-        batch=batch,
-        device=device,
-        seed=int(seed),
-        deterministic=True,
-        workers=0,
-        amp=False,
-        val=False,
-        plots=False,
-        project=project,
-        name=name,
-        exist_ok=True,
-        verbose=False,
-        **extra,
-    )
+    try:
+        model.train(
+            data=data_yaml,
+            epochs=epochs,
+            imgsz=imgsz,
+            batch=batch,
+            device=device,
+            seed=int(seed),
+            deterministic=True,
+            workers=0,
+            amp=False,
+            val=False,
+            plots=False,
+            project=project,
+            name=name,
+            exist_ok=True,
+            verbose=False,
+            **extra,
+        )
 
-    # Use trainer's save_dir when available (Ultralytics may write under runs/detect/...).
-    save_dir = None
-    trainer = getattr(model, "trainer", None)
-    if trainer is not None:
-        save_dir = getattr(trainer, "save_dir", None)
-    ckpt = Path(save_dir) / "weights" / "last.pt" if save_dir else None
+        save_dir = None
+        trainer = getattr(model, "trainer", None)
+        if trainer is not None:
+            save_dir = getattr(trainer, "save_dir", None)
+        ckpt = Path(save_dir) / "weights" / "last.pt" if save_dir else None
 
-    # Fallback: search for the most recent checkpoint for this run name.
-    if ckpt is None or not ckpt.exists():
-        candidates = []
-        for root in [Path(project), Path("runs"), Path.cwd()]:
-            if root.exists():
-                candidates.extend(root.rglob(f"{name}/weights/last.pt"))
-        if candidates:
-            ckpt = max(candidates, key=lambda p: p.stat().st_mtime)
-        else:
-            raise FileNotFoundError(f"Could not locate checkpoint last.pt for run name '{name}'")
+        if ckpt is None or not ckpt.exists():
+            candidates = []
+            for root in [Path(project), Path("runs"), Path.cwd()]:
+                if root.exists():
+                    candidates.extend(root.rglob(f"{name}/weights/last.pt"))
+            if candidates:
+                ckpt = max(candidates, key=lambda p: p.stat().st_mtime)
+            else:
+                raise FileNotFoundError(f"Could not locate checkpoint last.pt for run name '{name}'")
 
-    trained = YOLO(str(ckpt))
-    params = [v.detach().cpu().numpy() for _, v in trained.model.state_dict().items()]
-    n = count_train_images(data_yaml, trainer=trainer)
-    # _ckpt_path is an internal field consumed by the client to collect detection stats;
-    # it is stripped from the metrics dict before they are sent to the server.
-    return params, n, {"train_images": n, "_ckpt_path": str(ckpt)}
+        trained = YOLO(str(ckpt))
+        params = [v.detach().cpu().numpy() for _, v in trained.model.state_dict().items()]
+        n = count_train_images(data_yaml, trainer=trainer)
+        metrics = {"train_images": n, "_ckpt_path": str(ckpt)}
+    finally:
+        trained = None
+        model = None
+        _release_torch_memory()
+
+    return params, n, metrics
 
 
 def collect_detection_stats(
@@ -324,118 +359,126 @@ def collect_detection_stats(
             imgs_infer = patched
 
         model = YOLO(model_path)
-        results = model.predict(
-            source=[str(p) for p in imgs_infer],
-            imgsz=int(imgsz),
-            device=str(device),
-            conf=float(conf),
-            verbose=False,
-        )
+        results = None
+        gmodel = None
+        g_results = None
+        try:
+            results = model.predict(
+                source=[str(p) for p in imgs_infer],
+                imgsz=int(imgsz),
+                device=str(device),
+                conf=float(conf),
+                verbose=False,
+            )
 
-        class_freq: Dict[str, int] = {}
-        bbox_widths: List[float] = []
-        bbox_heights: List[float] = []
-        bbox_xcs: List[float] = []
-        bbox_ycs: List[float] = []
-        # Store per-image predicted boxes for IoU computation: list of [(cls,x1,y1,x2,y2), ...]
-        pred_boxes_per_img: List[List[Tuple]] = []
+            class_freq: Dict[str, int] = {}
+            bbox_widths: List[float] = []
+            bbox_heights: List[float] = []
+            bbox_xcs: List[float] = []
+            bbox_ycs: List[float] = []
+            pred_boxes_per_img: List[List[Tuple]] = []
 
-        for res in results:
-            boxes = getattr(res, "boxes", None)
-            img_preds: List[Tuple] = []
-            if boxes is not None:
-                cls_t = getattr(boxes, "cls", None)
-                xywhn_t = getattr(boxes, "xywhn", None)
-                xyxy_t = getattr(boxes, "xyxy", None)
-                if cls_t is not None and xywhn_t is not None:
-                    try:
-                        cls_arr = cls_t.detach().cpu().numpy().astype(int).tolist()
-                        xywhn_arr = xywhn_t.detach().cpu().numpy().tolist()
-                        xyxy_arr = xyxy_t.detach().cpu().numpy().tolist() if xyxy_t is not None else []
-                    except Exception:
-                        cls_arr, xywhn_arr, xyxy_arr = [], [], []
-                    for box_idx, (cls, (xc, yc, w, h)) in enumerate(zip(cls_arr, xywhn_arr)):
-                        key = str(int(cls))
-                        class_freq[key] = class_freq.get(key, 0) + 1
-                        bbox_widths.append(float(w))
-                        bbox_heights.append(float(h))
-                        bbox_xcs.append(float(xc))
-                        bbox_ycs.append(float(yc))
-                        if box_idx < len(xyxy_arr):
-                            img_preds.append((int(cls), *map(float, xyxy_arr[box_idx])))
-            pred_boxes_per_img.append(img_preds)
+            for res in (results or []):
+                boxes = getattr(res, "boxes", None)
+                img_preds: List[Tuple] = []
+                if boxes is not None:
+                    cls_t = getattr(boxes, "cls", None)
+                    xywhn_t = getattr(boxes, "xywhn", None)
+                    xyxy_t = getattr(boxes, "xyxy", None)
+                    if cls_t is not None and xywhn_t is not None:
+                        try:
+                            cls_arr = cls_t.detach().cpu().numpy().astype(int).tolist()
+                            xywhn_arr = xywhn_t.detach().cpu().numpy().tolist()
+                            xyxy_arr = xyxy_t.detach().cpu().numpy().tolist() if xyxy_t is not None else []
+                        except Exception:
+                            cls_arr, xywhn_arr, xyxy_arr = [], [], []
+                        for box_idx, (cls, (xc, yc, w, h)) in enumerate(zip(cls_arr, xywhn_arr)):
+                            key = str(int(cls))
+                            class_freq[key] = class_freq.get(key, 0) + 1
+                            bbox_widths.append(float(w))
+                            bbox_heights.append(float(h))
+                            bbox_xcs.append(float(xc))
+                            bbox_ycs.append(float(yc))
+                            if box_idx < len(xyxy_arr):
+                                img_preds.append((int(cls), *map(float, xyxy_arr[box_idx])))
+                pred_boxes_per_img.append(img_preds)
 
-        def _safe_mean(lst: List[float]) -> float:
-            return float(np.mean(lst)) if lst else 0.0
+            def _safe_mean(lst: List[float]) -> float:
+                return float(np.mean(lst)) if lst else 0.0
 
-        def _safe_std(lst: List[float]) -> float:
-            return float(np.std(lst)) if lst else 0.0
+            def _safe_std(lst: List[float]) -> float:
+                return float(np.std(lst)) if lst else 0.0
 
-        total_dets = sum(class_freq.values())
-        stats: Dict = {
-            "class_freq": class_freq,
-            "bbox_w_mean": _safe_mean(bbox_widths),
-            "bbox_w_std": _safe_std(bbox_widths),
-            "bbox_h_mean": _safe_mean(bbox_heights),
-            "bbox_h_std": _safe_std(bbox_heights),
-            "bbox_xc_mean": _safe_mean(bbox_xcs),
-            "bbox_yc_mean": _safe_mean(bbox_ycs),
-            "total_detections": int(total_dets),
-            "num_images": int(len(imgs_infer)),
-            "triggered": bool(trigger),
-        }
+            total_dets = sum(class_freq.values())
+            stats: Dict = {
+                "class_freq": class_freq,
+                "bbox_w_mean": _safe_mean(bbox_widths),
+                "bbox_w_std": _safe_std(bbox_widths),
+                "bbox_h_mean": _safe_mean(bbox_heights),
+                "bbox_h_std": _safe_std(bbox_heights),
+                "bbox_xc_mean": _safe_mean(bbox_xcs),
+                "bbox_yc_mean": _safe_mean(bbox_ycs),
+                "total_detections": int(total_dets),
+                "num_images": int(len(imgs_infer)),
+                "triggered": bool(trigger),
+            }
 
         # ── Optional: IoU vs global model ────────────────────────────────────
-        if global_model_path and Path(global_model_path).exists():
-            try:
-                gmodel = YOLO(global_model_path)
-                g_results = gmodel.predict(
-                    source=[str(p) for p in imgs_infer],
-                    imgsz=int(imgsz),
-                    device=str(device),
-                    conf=float(conf),
-                    verbose=False,
-                )
-                iou_vals: List[float] = []
-                for res_g, client_preds in zip(g_results, pred_boxes_per_img):
-                    boxes_g = getattr(res_g, "boxes", None)
-                    if boxes_g is None or not client_preds:
-                        continue
-                    xyxy_g_t = getattr(boxes_g, "xyxy", None)
-                    if xyxy_g_t is None:
-                        continue
-                    try:
-                        gboxes = xyxy_g_t.detach().cpu().numpy().tolist()
-                    except Exception:
-                        continue
-                    if not gboxes:
-                        continue
-                    # Compute mean IoU between client predictions and global predictions
-                    for _, x1c, y1c, x2c, y2c in client_preds:
-                        best_iou = 0.0
-                        for gbox in gboxes:
-                            x1g, y1g, x2g, y2g = map(float, gbox[:4])
-                            ix1 = max(x1c, x1g)
-                            iy1 = max(y1c, y1g)
-                            ix2 = min(x2c, x2g)
-                            iy2 = min(y2c, y2g)
-                            iw = max(0.0, ix2 - ix1)
-                            ih = max(0.0, iy2 - iy1)
-                            inter = iw * ih
-                            if inter <= 0.0:
-                                continue
-                            area_c = max(0.0, x2c - x1c) * max(0.0, y2c - y1c)
-                            area_g = max(0.0, x2g - x1g) * max(0.0, y2g - y1g)
-                            denom = area_c + area_g - inter
-                            iou_val = float(inter / denom) if denom > 0 else 0.0
-                            if iou_val > best_iou:
-                                best_iou = iou_val
-                        iou_vals.append(best_iou)
-                if iou_vals:
-                    stats["mean_iou_vs_global"] = float(np.mean(iou_vals))
-            except Exception:
-                pass  # IoU vs global is optional; silently skip on any error
+            if global_model_path and Path(global_model_path).exists():
+                try:
+                    gmodel = YOLO(global_model_path)
+                    g_results = gmodel.predict(
+                        source=[str(p) for p in imgs_infer],
+                        imgsz=int(imgsz),
+                        device=str(device),
+                        conf=float(conf),
+                        verbose=False,
+                    )
+                    iou_vals: List[float] = []
+                    for res_g, client_preds in zip(g_results, pred_boxes_per_img):
+                        boxes_g = getattr(res_g, "boxes", None)
+                        if boxes_g is None or not client_preds:
+                            continue
+                        xyxy_g_t = getattr(boxes_g, "xyxy", None)
+                        if xyxy_g_t is None:
+                            continue
+                        try:
+                            gboxes = xyxy_g_t.detach().cpu().numpy().tolist()
+                        except Exception:
+                            continue
+                        if not gboxes:
+                            continue
+                        for _, x1c, y1c, x2c, y2c in client_preds:
+                            best_iou = 0.0
+                            for gbox in gboxes:
+                                x1g, y1g, x2g, y2g = map(float, gbox[:4])
+                                ix1 = max(x1c, x1g)
+                                iy1 = max(y1c, y1g)
+                                ix2 = min(x2c, x2g)
+                                iy2 = min(y2c, y2g)
+                                iw = max(0.0, ix2 - ix1)
+                                ih = max(0.0, iy2 - iy1)
+                                inter = iw * ih
+                                if inter <= 0.0:
+                                    continue
+                                area_c = max(0.0, x2c - x1c) * max(0.0, y2c - y1c)
+                                area_g = max(0.0, x2g - x1g) * max(0.0, y2g - y1g)
+                                denom = area_c + area_g - inter
+                                iou_val = float(inter / denom) if denom > 0 else 0.0
+                                if iou_val > best_iou:
+                                    best_iou = iou_val
+                            iou_vals.append(best_iou)
+                    if iou_vals:
+                        stats["mean_iou_vs_global"] = float(np.mean(iou_vals))
+                except Exception:
+                    pass
 
-        return json.dumps(stats, separators=(",", ":"))
+            return json.dumps(stats, separators=(",", ":"))
+        finally:
+            results = None
+            g_results = None
+            model = None
+            gmodel = None
+            _release_torch_memory()
     except Exception:
         return ""
