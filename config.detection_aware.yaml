@@ -119,6 +119,11 @@ defense:
   collect_detection_stats: true  # clients run inference on their val set each round
   det_stats_max_images: 50       # max images per client per round (keeps overhead low)
   det_stats_conf: 0.25           # prediction confidence threshold
+  # Collect stats on TRIGGERED images (helps detect backdoor clients).
+  det_stats_trigger: true
+  det_stats_trigger_size: 16
+  det_stats_trigger_value: 255
+  det_stats_trigger_position: "bottom_right"
 
 runtime:
   tmp_dir: "./tmp"

@@ -99,6 +99,7 @@ def main():
 
     # 1) partition dataset (required for true FL)
     if (cfg.get("federated") or {}).get("auto_partition", True):
+        print(f"Partitioning dataset -> out_dir={cfg['federated']['data_dir']} num_clients={args.num_clients}")
         cmd = [
             sys.executable, "data_partition.py",
             "--data_yaml", cfg["dataset"]["base_data_yaml"],
@@ -172,6 +173,9 @@ def main():
         "aggregation": str(args.aggregation),
         "config": str(args.config),
     }
+    # Defensive: ensure log_dir exists even if user launches from an unexpected CWD
+    # or a previous run cleaned it up.
+    log_dir.mkdir(parents=True, exist_ok=True)
     with open(log_dir / "run_meta.yaml", "w", encoding="utf-8") as f:
         yaml.safe_dump(meta, f, sort_keys=False)
 
@@ -195,6 +199,7 @@ def main():
         env = dict(os.environ)
         env["PYTHONUNBUFFERED"] = "1"  # make subprocess logs appear in near-realtime
 
+        print(f"Starting server -> {host}:{port} (logs: {server_log_path.resolve()})")
         server_log = open(server_log_path, "w", encoding="utf-8", buffering=1)
         server = subprocess.Popen(server_cmd, stdout=server_log, stderr=subprocess.STDOUT, text=True, env=env)
         # Server startup can take time (imports, weights load). Wait for the port to accept connections.
@@ -222,6 +227,7 @@ def main():
             raise SystemExit(msg)
 
         # 3) launch clients
+        print(f"Server is ready. Launching {args.num_clients} clients (logs: {log_dir.resolve()})")
         for cid in range(args.num_clients):
             clog = open(log_dir / f"client_{cid}.log", "w", encoding="utf-8", buffering=1)
             client_logs.append(clog)

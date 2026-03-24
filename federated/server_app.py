@@ -173,8 +173,12 @@ def run_server(host: str, port: int, rounds: int, cfg_path: str, expected_client
     min_fit = int(cfg["federated"]["min_fit_clients"])
     min_avail = int(cfg["federated"]["min_available_clients"])
     if expected_clients and expected_clients > 0:
-        min_fit = max(min_fit, expected_clients)
-        min_avail = max(min_avail, expected_clients)
+        # expected_clients comes from the launcher (run_experiment.py) and represents how many
+        # clients we *attempted* to start. Do not force min_* to expected_clients, otherwise
+        # a single crashed/slow client can stall the entire run indefinitely (common on Colab).
+        # Instead, cap the configured minima so they never exceed the expected count.
+        min_fit = min(min_fit, expected_clients)
+        min_avail = min(min_avail, expected_clients)
 
     strategy = DeltaFedAvgStrategy(
         cfg=cfg,

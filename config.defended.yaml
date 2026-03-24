@@ -102,6 +102,11 @@ defense:
   collect_detection_stats: true    # enable client-side stat collection
   det_stats_max_images: 50         # max val images for client inference
   det_stats_conf: 0.25             # confidence threshold for client inference
+  # Collect stats on TRIGGERED images (helps detect backdoor clients).
+  det_stats_trigger: true
+  det_stats_trigger_size: 40
+  det_stats_trigger_value: 255
+  det_stats_trigger_position: "bottom_right"
 
 runtime:
   tmp_dir: "./tmp"

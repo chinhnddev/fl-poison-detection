@@ -161,6 +161,18 @@ class YoloDeltaClient(fl.client.NumPyClient):
         self._collect_det_stats = bool(defense_cfg.get("collect_detection_stats", False))
         self._det_stats_max_images = int(defense_cfg.get("det_stats_max_images", 50))
         self._det_stats_conf = float(defense_cfg.get("det_stats_conf", 0.25))
+        self._det_stats_trigger = bool(defense_cfg.get("det_stats_trigger", False))
+
+        backdoor_cfg = ((cfg.get("attack") or {}).get("backdoor") or {})
+        self._det_stats_trigger_size = int(
+            defense_cfg.get("det_stats_trigger_size", backdoor_cfg.get("trigger_size", 40))
+        )
+        self._det_stats_trigger_value = int(
+            defense_cfg.get("det_stats_trigger_value", backdoor_cfg.get("trigger_value", 255))
+        )
+        self._det_stats_trigger_position = str(
+            defense_cfg.get("det_stats_trigger_position", backdoor_cfg.get("position", "bottom_right"))
+        )
 
         logging.getLogger("client").info(
             "cid=%s malicious=%s shard=%s local_epochs=%s imgsz=%s batch=%s device=%s",
@@ -246,6 +258,12 @@ class YoloDeltaClient(fl.client.NumPyClient):
             ckpt_path = metrics.pop("_ckpt_path", "")
             if ckpt_path and Path(ckpt_path).exists():
                 try:
+                    det_tmp_dir = (
+                        Path(self.cfg["runtime"]["tmp_dir"])
+                        / "det_stats_triggered"
+                        / f"cid_{self.cid}"
+                        / f"round_{server_round}"
+                    )
                     det_json = collect_detection_stats(
                         model_path=ckpt_path,
                         val_yaml=self.data_yaml,
@@ -254,6 +272,11 @@ class YoloDeltaClient(fl.client.NumPyClient):
                         max_images=self._det_stats_max_images,
                         conf=self._det_stats_conf,
                         global_model_path=str(tmp_model),
+                        trigger=bool(self._det_stats_trigger),
+                        trigger_size=int(self._det_stats_trigger_size),
+                        trigger_value=int(self._det_stats_trigger_value),
+                        trigger_position=str(self._det_stats_trigger_position),
+                        trigger_tmp_dir=str(det_tmp_dir),
                     )
                     if det_json:
                         metrics["detection_stats"] = det_json
