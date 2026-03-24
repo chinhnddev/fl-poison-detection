@@ -11,8 +11,8 @@ federated:
   data_dir: "./federated_data_defended"
   partition: "iid"
   dirichlet_alpha: 2.0
-  min_fit_clients: 5
-  min_available_clients: 5
+  min_fit_clients: 10
+  min_available_clients: 10
 
 model:
   initial_weights: "yolov8n.pt"
@@ -22,7 +22,7 @@ train:
   local_epochs: 2
   imgsz: 320
   batch: 4
-  device: "cpu"
+  device: "cuda:0"
   # Backdoor triggers are spatial patterns; disabling heavy augmentation improves ASR stability.
   mosaic: 0.0
   mixup: 0.0
@@ -98,8 +98,8 @@ defense:
   # additionally uses per-client prediction statistics (class frequencies,
   # bbox distributions, detection rate, IoU vs global) reported by clients.
   # Clients must also set collect_detection_stats: true below.
-  detection_aware: false
-  collect_detection_stats: false   # set true to enable client-side stat collection
+  detection_aware: true
+  collect_detection_stats: true    # enable client-side stat collection
   det_stats_max_images: 50         # max val images for client inference
   det_stats_conf: 0.25             # confidence threshold for client inference
 
