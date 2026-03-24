@@ -90,7 +90,7 @@ defense:
     cosine: 1.5
     norm: 1.0
     dist: 1.0
-  min_score: 2.5
+  min_score: 3.0
   use_mad: true
   min_clients: 4
   # ── Detection-aware extension ─────────────────────────────────────────────
