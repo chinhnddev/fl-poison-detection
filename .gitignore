@@ -8,6 +8,7 @@ __pycache__/
 logs*/
 runs*/
 tmp*/
+artifacts/tmp_spchm/
 
 # Datasets (large)
 datasets/

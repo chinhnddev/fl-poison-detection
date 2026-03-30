@@ -158,7 +158,8 @@ class YoloDeltaClient(fl.client.NumPyClient):
         # Detection-aware defense: collect prediction statistics after local training.
         # Controlled by defense.collect_detection_stats in the YAML config.
         defense_cfg = cfg.get("defense") or {}
-        self._collect_det_stats = bool(defense_cfg.get("collect_detection_stats", False))
+        self._spchm_trust = bool(defense_cfg.get("spchm_trust", False))
+        self._collect_det_stats = bool(defense_cfg.get("collect_detection_stats", False)) and not self._spchm_trust
         self._det_stats_max_images = int(defense_cfg.get("det_stats_max_images", 50))
         self._det_stats_conf = float(defense_cfg.get("det_stats_conf", 0.25))
         self._det_stats_trigger = bool(defense_cfg.get("det_stats_trigger", False))

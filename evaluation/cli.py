@@ -6,6 +6,7 @@ from typing import Dict, Optional
 
 from .asr import asr_backdoor_object_level
 from .map_eval import evaluate_map
+from .perception_metrics import evaluate_perception_metrics
 
 
 @dataclass
@@ -42,6 +43,32 @@ def _print_table(rows):
         print(fmt.format(*row))
 
 
+def _print_perception(rows):
+    headers = ["name", "missing", "ghost", "cls_mismatch", "box_dev"]
+    data = []
+    for row in rows:
+        extra = row.extra.get("perception") or {}
+        data.append(
+            [
+                row.name,
+                "-" if extra.get("missing_object_rate") is None else f"{extra['missing_object_rate']:.4f}",
+                "-" if extra.get("ghost_object_rate") is None else f"{extra['ghost_object_rate']:.4f}",
+                "-" if extra.get("class_mismatch_rate") is None else f"{extra['class_mismatch_rate']:.4f}",
+                "-" if extra.get("mean_box_deviation") is None else f"{extra['mean_box_deviation']:.4f}",
+            ]
+        )
+    widths = [len(c) for c in headers]
+    for row in data:
+        for i, v in enumerate(row):
+            widths[i] = max(widths[i], len(str(v)))
+    fmt = "  ".join("{:<" + str(w) + "}" for w in widths)
+    print("\nPerception Metrics")
+    print(fmt.format(*headers))
+    print(fmt.format(*["-" * w for w in widths]))
+    for row in data:
+        print(fmt.format(*row))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", required=True)
@@ -60,6 +87,11 @@ def main():
     ap.add_argument("--trigger_size", type=int, default=40)
     ap.add_argument("--trigger_value", type=int, default=255)
     ap.add_argument("--trigger_position", default="bottom_right")
+    ap.add_argument("--perception", action="store_true", help="Evaluate perception-oriented detection metrics")
+    ap.add_argument("--perception_data", default="", help="Optional dataset YAML override for perception metrics")
+    ap.add_argument("--perception_conf", type=float, default=0.25)
+    ap.add_argument("--perception_max_images", type=int, default=0)
+    ap.add_argument("--perception_class_penalty", type=float, default=0.5)
     args = ap.parse_args()
 
     rows = []
@@ -85,9 +117,22 @@ def main():
                 mode=str(args.asr_mode),
                 limit_images=args.asr_limit_images,
             )
-        rows.append(EvalResult(name=name, model=mp, map50=mm["map50"], map5095=mm["map5095"], asr=asr, extra={}))
+        extra = {}
+        if args.perception:
+            extra["perception"] = evaluate_perception_metrics(
+                model_path=mp,
+                data_yaml=args.perception_data or args.data,
+                imgsz=args.imgsz,
+                device=args.device,
+                conf=args.perception_conf,
+                max_images=args.perception_max_images,
+                class_penalty=args.perception_class_penalty,
+            )
+        rows.append(EvalResult(name=name, model=mp, map50=mm["map50"], map5095=mm["map5095"], asr=asr, extra=extra))
 
     _print_table(rows)
+    if args.perception and rows:
+        _print_perception(rows)
 
 
 if __name__ == "__main__":

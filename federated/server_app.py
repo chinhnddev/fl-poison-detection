@@ -13,7 +13,14 @@ from flwr.common import FitRes, Parameters, Scalar, ndarrays_to_parameters, para
 from flwr.server.client_proxy import ClientProxy
 
 from aggregation import weighted_fedavg
-from defense import DefenseConfig, DetectionAwareDefenseConfig, detection_aware_filter, robust_filter
+from defense import (
+    DefenseConfig,
+    DetectionAwareDefenseConfig,
+    SPCHMTrustConfig,
+    detection_aware_filter,
+    robust_filter,
+    run_spchm_trust_round,
+)
 from train_yolo import get_parameters, set_parameters_to_model
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -72,6 +79,62 @@ def _load_detection_aware_cfg(cfg: Dict) -> Optional[DetectionAwareDefenseConfig
     )
 
 
+def _load_spchm_cfg(cfg: Dict) -> Optional[SPCHMTrustConfig]:
+    d = cfg.get("defense") or {}
+    if not bool(d.get("spchm_trust", False)):
+        return None
+
+    train_cfg = cfg.get("train") or {}
+    runtime_cfg = cfg.get("runtime") or {}
+    train_overrides = {
+        k: train_cfg.get(k)
+        for k in [
+            "augment",
+            "mosaic",
+            "mixup",
+            "copy_paste",
+            "fliplr",
+            "flipud",
+            "hsv_h",
+            "hsv_s",
+            "hsv_v",
+            "degrees",
+            "translate",
+            "scale",
+            "shear",
+            "perspective",
+        ]
+        if k in train_cfg
+    }
+
+    seed = int((runtime_cfg.get("seed")) or 1234)
+    runtime_train_dir = Path(str(runtime_cfg.get("train_runs_dir", "./runs_fl")))
+    return SPCHMTrustConfig(
+        enabled=bool(d.get("enabled", True)),
+        proxy_data_yaml=str(d.get("proxy_data_yaml", "")),
+        root_data_yaml=str(d.get("root_data_yaml", "")),
+        proxy_max_images=int(d.get("proxy_max_images", 32)),
+        proxy_conf=float(d.get("proxy_conf", 0.25)),
+        proxy_imgsz=int(d.get("proxy_imgsz", d.get("root_imgsz", train_cfg.get("imgsz", 320)))),
+        tau=float(d.get("tau", 2.0)),
+        eps=float(d.get("eps", 1e-8)),
+        lambda_box=float(d.get("lambda_box", 1.0)),
+        lambda_cls=float(d.get("lambda_cls", 1.0)),
+        lambda_miss=float(d.get("lambda_miss", 1.0)),
+        lambda_ghost=float(d.get("lambda_ghost", 1.0)),
+        hungarian_class_penalty=float(d.get("hungarian_class_penalty", 0.5)),
+        root_epochs=int(d.get("root_epochs", 1)),
+        root_batch=int(d.get("root_batch", train_cfg.get("batch", 4))),
+        root_imgsz=int(d.get("root_imgsz", train_cfg.get("imgsz", 320))),
+        root_device=str(d.get("root_device", train_cfg.get("device", "cpu"))),
+        trust_floor=float(d.get("trust_floor", 0.0)),
+        tmp_dir=str(d.get("tmp_dir", "./artifacts/tmp_spchm")),
+        train_runs_dir=str(d.get("train_runs_dir", runtime_train_dir / "spchm_server_root")),
+        seed=seed,
+        train_overrides=train_overrides,
+    )
+
+
 class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
     """FedAvg strategy where clients send deltas and server updates global weights."""
 
@@ -83,7 +146,9 @@ class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
         self._round_global: Optional[List[np.ndarray]] = None
         self._round_stats_out = str(round_stats_out)
         self._dcfg = _load_defense_cfg(cfg)
-        # Detection-aware defense takes priority over gradient-only defense when configured.
+        self._spchm_cfg: Optional[SPCHMTrustConfig] = _load_spchm_cfg(cfg)
+        # Defense priority is handled in aggregate_fit: SPCHM-Trust, then detection-aware,
+        # then the legacy gradient-only filter, then plain FedAvg.
         self._da_cfg: Optional[DetectionAwareDefenseConfig] = _load_detection_aware_cfg(cfg)
 
     def configure_fit(self, server_round: int, parameters: Parameters, client_manager):
@@ -113,13 +178,35 @@ class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
         metrics_rows = []
         for cp, fr in results:
             delta = parameters_to_ndarrays(fr.parameters)
+            metrics = dict(fr.metrics) if fr.metrics else {}
             updates_delta.append((cp.cid, delta, fr.num_examples))
-            metrics_rows.append({"cid": cp.cid, "num_examples": fr.num_examples, **(dict(fr.metrics) if fr.metrics else {})})
-            logger.info("round=%s client=%s num_examples=%s metrics=%s", server_round, cp.cid, fr.num_examples, dict(fr.metrics))
+            metrics_rows.append({"cid": cp.cid, "num_examples": fr.num_examples, **metrics})
+            logger.info("round=%s client=%s num_examples=%s metrics=%s", server_round, cp.cid, fr.num_examples, metrics)
 
         filtered = list(updates_delta)
         dmeta: Dict = {"removed_cids": [], "reason": "defense_disabled"}
-        if self._da_cfg is not None and self._da_cfg.enabled:
+        agg_delta = None
+        mode = "fedavg"
+        if self._spchm_cfg is not None and self._spchm_cfg.enabled:
+            mode = "spchm_trust"
+            dmeta = run_spchm_trust_round(
+                updates=updates_delta,
+                global_params=self._round_global,
+                cfg=self._spchm_cfg,
+                base_model_path=self.base_model,
+                server_round=server_round,
+            )
+            agg_delta = dmeta["aggregated_delta"]
+            logger.info(
+                "round=%s spchm_trust clients=%s proxy_images=%s fallback_used=%s root_examples=%s",
+                server_round,
+                len(updates_delta),
+                dmeta.get("proxy_num_images", 0),
+                dmeta.get("fallback_used", False),
+                dmeta.get("root_num_examples", 0),
+            )
+        elif self._da_cfg is not None and self._da_cfg.enabled:
+            mode = "detection_aware"
             # Detection-aware defense: uses both gradient deltas and prediction stats.
             filtered, dmeta = detection_aware_filter(updates_delta, metrics_rows, self._da_cfg)
             logger.info(
@@ -129,11 +216,13 @@ class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
                 dmeta.get("has_detection_stats", 0),
             )
         elif self._dcfg.enabled:
+            mode = "robust_filter"
             filtered, dmeta = robust_filter(updates_delta, self._dcfg)
             logger.info("round=%s defense removed clients=%s", server_round, dmeta.get("removed_cids", []))
 
         # Aggregate deltas with weighted average.
-        agg_delta = weighted_fedavg(filtered)  # treat "weights" as deltas
+        if agg_delta is None:
+            agg_delta = weighted_fedavg(filtered)  # treat "weights" as deltas
         new_global = [np.asarray(g) + np.asarray(d) for g, d in zip(self._round_global, agg_delta)]
 
         # Save global model checkpoint (optional).
@@ -145,21 +234,48 @@ class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
         if self._round_stats_out:
             p = Path(self._round_stats_out)
             p.parent.mkdir(parents=True, exist_ok=True)
-            rec = {
-                "round": int(server_round),
-                "removed_cids": dmeta.get("removed_cids", []),
-                "defense_reason": dmeta.get("reason", ""),
-                "num_results": int(len(results)),
-                "num_kept": int(len(filtered)),
-                "client_metrics": metrics_rows,
-            }
             with open(p, "a", encoding="utf-8") as f:
-                f.write(json.dumps(rec) + "\n")
+                if mode == "spchm_trust":
+                    for row in dmeta.get("client_diagnostics", []):
+                        rec = {
+                            "round": int(server_round),
+                            "mode": mode,
+                            "cid": row.get("cid", ""),
+                            "num_examples": int(row.get("num_examples", 0)),
+                            "s_i": float(row.get("s_i", 0.0)),
+                            "d_box": float(row.get("d_box", 0.0)),
+                            "d_cls": float(row.get("d_cls", 0.0)),
+                            "r_miss": float(row.get("r_miss", 0.0)),
+                            "r_ghost": float(row.get("r_ghost", 0.0)),
+                            "z_i": float(row.get("z_i", 0.0)),
+                            "cosine_root": float(row.get("cosine_root", 0.0)),
+                            "trust_raw": float(row.get("trust_raw", 0.0)),
+                            "trust_weight": float(row.get("trust_weight", 0.0)),
+                            "fallback_used": bool(row.get("fallback_used", False)),
+                            "score_median": float(dmeta.get("score_median", 0.0)),
+                            "score_mad": float(dmeta.get("score_mad", 0.0)),
+                            "proxy_num_images": int(dmeta.get("proxy_num_images", 0)),
+                            "root_num_examples": int(dmeta.get("root_num_examples", 0)),
+                            "root_checkpoint": str(dmeta.get("root_checkpoint", "")),
+                        }
+                        f.write(json.dumps(rec) + "\n")
+                else:
+                    rec = {
+                        "round": int(server_round),
+                        "mode": mode,
+                        "removed_cids": dmeta.get("removed_cids", []),
+                        "defense_reason": dmeta.get("reason", ""),
+                        "num_results": int(len(results)),
+                        "num_kept": int(len(filtered)),
+                        "client_metrics": metrics_rows,
+                    }
+                    f.write(json.dumps(rec) + "\n")
 
         # Update cached global for next round.
         self._round_global = new_global
 
-        return ndarrays_to_parameters(new_global), {"kept_clients": int(len(filtered)), "removed_clients": int(len(dmeta.get("removed_cids", [])))}
+        kept_clients = len(updates_delta) if mode == "spchm_trust" else len(filtered)
+        return ndarrays_to_parameters(new_global), {"kept_clients": int(kept_clients), "removed_clients": int(len(dmeta.get("removed_cids", [])))}
 
 
 def run_server(host: str, port: int, rounds: int, cfg_path: str, expected_clients: int = 0, round_stats_out: str = "") -> None:

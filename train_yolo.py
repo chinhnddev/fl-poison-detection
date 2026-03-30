@@ -2,7 +2,7 @@ import json
 import os
 import random
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 # Ultralytics creates a settings directory on import. In locked-down environments
 # `%APPDATA%` may be non-writable; set a repo-local config root to avoid failures.
@@ -123,6 +123,175 @@ def set_parameters_to_model(base_model_path: str, params: NDArrays, out_model_pa
     finally:
         model = None
         _release_torch_memory()
+
+
+def _load_parameters_into_yolo(model: YOLO, params: NDArrays) -> None:
+    sd = _state_dict_from_model(model)
+    keys = list(sd.keys())
+    if len(keys) != len(params):
+        raise ValueError("Parameter length mismatch")
+
+    new_sd = {}
+    for k, arr in zip(keys, params):
+        a = np.asarray(arr)
+        if a.shape == () and sd[k].numel() == 1 and tuple(sd[k].shape) != ():
+            a = a.reshape(tuple(sd[k].shape))
+        new_sd[k] = torch.from_numpy(a).to(sd[k].dtype)
+    model.model.load_state_dict(new_sd, strict=True)
+
+
+def _resolve_split_reference(data_yaml: str, split: str) -> Tuple[Dict[str, Any], Path]:
+    yaml_path = Path(data_yaml)
+    if not yaml_path.exists():
+        raise FileNotFoundError(f"Dataset YAML not found: {data_yaml}")
+    cfg = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+    split_ref = cfg.get(split, "")
+    if not split_ref:
+        raise ValueError(f"Dataset YAML '{data_yaml}' does not define split '{split}'")
+    p = Path(str(split_ref))
+    if p.is_absolute():
+        return cfg, p
+
+    direct = (yaml_path.parent / p).resolve()
+    if direct.exists():
+        return cfg, direct
+
+    root = cfg.get("path", "")
+    if root:
+        rooted = (yaml_path.parent / Path(str(root)) / p).resolve()
+        if rooted.exists():
+            return cfg, rooted
+    return cfg, direct
+
+
+def load_dataset_images(data_yaml: str, split: str = "val", max_images: int = 0) -> List[Path]:
+    _, ref_path = _resolve_split_reference(data_yaml, split)
+    exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+    if ref_path.suffix.lower() == ".txt" and ref_path.exists():
+        images = []
+        for line in ref_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            p = Path(line)
+            if not p.is_absolute():
+                p = (ref_path.parent / p).resolve()
+            if p.exists():
+                images.append(p)
+    elif ref_path.exists() and ref_path.is_dir():
+        images = [x for x in ref_path.rglob("*") if x.suffix.lower() in exts and x.exists()]
+    else:
+        raise FileNotFoundError(f"Could not resolve dataset split '{split}' from {data_yaml}")
+
+    images = sorted(images)
+    if max_images and max_images > 0:
+        images = images[: int(max_images)]
+    return images
+
+
+def _extract_prediction_rows(results, image_paths: Sequence[Path]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for image_path, res in zip(image_paths, results or []):
+        detections: List[Dict[str, Any]] = []
+        boxes = getattr(res, "boxes", None)
+        if boxes is not None:
+            cls_t = getattr(boxes, "cls", None)
+            conf_t = getattr(boxes, "conf", None)
+            xyxy_t = getattr(boxes, "xyxy", None)
+            if cls_t is not None and xyxy_t is not None:
+                try:
+                    cls_arr = cls_t.detach().cpu().numpy().astype(int).tolist()
+                    conf_arr = conf_t.detach().cpu().numpy().tolist() if conf_t is not None else [1.0] * len(cls_arr)
+                    xyxy_arr = xyxy_t.detach().cpu().numpy().tolist()
+                except Exception:
+                    cls_arr, conf_arr, xyxy_arr = [], [], []
+                for cls_val, conf_val, xyxy in zip(cls_arr, conf_arr, xyxy_arr):
+                    detections.append(
+                        {
+                            "cls": int(cls_val),
+                            "conf": float(conf_val),
+                            "xyxy": [float(v) for v in xyxy[:4]],
+                        }
+                    )
+        detections.sort(key=lambda item: (-item["conf"], item["cls"], item["xyxy"]))
+        rows.append({"image_id": str(image_path), "detections": detections})
+    return rows
+
+
+class ReusableYOLOPredictor:
+    """Reuse a single YOLO object while iteratively loading parameter arrays."""
+
+    def __init__(self, base_model_path: str):
+        self.base_model_path = str(base_model_path)
+        self.model = YOLO(self.base_model_path)
+        try:
+            self.model.to("cpu")
+        except Exception:
+            pass
+
+    def load_parameters(self, params: NDArrays) -> None:
+        _load_parameters_into_yolo(self.model, params)
+
+    def predict(self, image_paths: Sequence[Path], imgsz: int, device: str, conf: float) -> List[Dict[str, Any]]:
+        results = self.model.predict(
+            source=[str(p) for p in image_paths],
+            imgsz=int(imgsz),
+            device=str(device),
+            conf=float(conf),
+            verbose=False,
+        )
+        try:
+            return _extract_prediction_rows(results, image_paths)
+        finally:
+            results = None
+            _release_torch_memory()
+
+    def close(self) -> None:
+        self.model = None
+        _release_torch_memory()
+
+
+def build_root_delta(
+    base_model_path: str,
+    global_params: NDArrays,
+    root_data_yaml: str,
+    epochs: int,
+    imgsz: int,
+    batch: int,
+    device: str,
+    project: str,
+    tmp_dir: str,
+    server_round: int,
+    seed: int = 0,
+    train_overrides: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    tmp_root = Path(tmp_dir)
+    tmp_root.mkdir(parents=True, exist_ok=True)
+
+    round_base_ckpt = tmp_root / f"root_start_round_{int(server_round):04d}.pt"
+    set_parameters_to_model(base_model_path, global_params, str(round_base_ckpt))
+
+    root_params, num_examples, metrics = train_local(
+        model_path=str(round_base_ckpt),
+        data_yaml=root_data_yaml,
+        epochs=int(epochs),
+        imgsz=int(imgsz),
+        batch=int(batch),
+        device=str(device),
+        project=str(project),
+        name=f"root_round_{int(server_round):04d}",
+        seed=int(seed) + 10000 * max(int(server_round), 0),
+        train_overrides=train_overrides,
+    )
+    delta_root = [np.asarray(rp) - np.asarray(gp) for rp, gp in zip(root_params, global_params)]
+    trained_ckpt = str(dict(metrics).get("_ckpt_path") or round_base_ckpt)
+    return {
+        "delta_root": delta_root,
+        "num_examples": int(num_examples),
+        "metrics": dict(metrics),
+        "checkpoint_path": trained_ckpt,
+        "base_checkpoint_path": str(round_base_ckpt),
+    }
 
 
 def count_train_images(data_yaml: str, trainer=None) -> int:
@@ -279,48 +448,12 @@ def collect_detection_stats(
     Returns an empty string ``""`` on any error so the caller can safely skip stats.
     """
     try:
-        import yaml as _yaml
-
-        yp = Path(val_yaml)
-        if not yp.exists():
+        try:
+            imgs = load_dataset_images(val_yaml, split="val", max_images=int(max_images))
+        except Exception:
             return ""
-        cfg_data = _yaml.safe_load(yp.read_text(encoding="utf-8")) or {}
-        val_ref = cfg_data.get("val", "")
-        if not val_ref:
-            return ""
-
-        # Resolve val path relative to yaml location
-        vp = Path(str(val_ref))
-        if not vp.is_absolute():
-            vp1 = (yp.parent / vp).resolve()
-            root = cfg_data.get("path", "")
-            if root:
-                vp2 = (yp.parent / Path(str(root)) / vp).resolve()
-                vp = vp2 if vp2.exists() else (vp1 if vp1.exists() else vp)
-            else:
-                vp = vp1
-
-        # Collect images
-        exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
-        if vp.suffix.lower() == ".txt" and vp.exists():
-            imgs = [
-                Path(l.strip())
-                for l in vp.read_text(encoding="utf-8").splitlines()
-                if l.strip()
-            ]
-            # Resolve relative paths
-            imgs = [(vp.parent / p).resolve() if not p.is_absolute() else p for p in imgs]
-        elif vp.exists() and vp.is_dir():
-            imgs = [x for x in vp.rglob("*") if x.suffix.lower() in exts]
-        else:
-            return ""
-
-        imgs = [p for p in imgs if p.exists()]
         if not imgs:
             return ""
-
-        # Limit to max_images (deterministic: take first N after sort)
-        imgs = sorted(imgs)[: int(max_images)]
 
         def _apply_trigger_to_temp(img: Path, trigger_size: int, trigger_value: int, position: str, tmp_dir: Path) -> Path:
             from PIL import Image, ImageDraw

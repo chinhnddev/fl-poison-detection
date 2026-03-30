@@ -2,6 +2,7 @@ flwr>=1.8.0
 ultralytics>=8.2.0
 
 numpy>=1.23
+scipy>=1.10.0
 PyYAML>=6.0.1
 pillow>=9.4.0
 opencv-python-headless>=4.8.0.74

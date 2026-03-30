@@ -4,10 +4,11 @@ Federated Learning (FL) pipeline for object detection with:
 
 - YOLOv8 (Ultralytics)
 - Flower (FL orchestration)
-- IID / Dirichlet Non-IID client partitioning
-- Honest vs malicious clients (label flip + model poisoning)
-- Optional defense filtering before aggregation
-- Evaluation: `mAP@0.5`, `mAP@0.5:0.95`, and Attack Success Rate (ASR)
+- IID / Dirichlet non-IID client partitioning
+- Honest vs malicious clients (label flip, bbox distortion, object removal, backdoor, model poisoning)
+- Legacy gradient-only and detection-aware defenses
+- New thesis-mode server-side defense: `SPCHM-Trust`
+- Evaluation: `mAP@0.5`, `mAP@0.5:0.95`, ASR, and optional perception metrics
 
 ## 1) Install
 
@@ -30,9 +31,9 @@ python data_partition.py --config config.baseline.yaml
 
 If `federated.auto_partition: true` (default in configs), `run_experiment.py` will do it automatically.
 
-## 3) Run Experiments (Baseline / Attack / Defended)
+## 3) Run Experiments
 
-Run these in order so you get 3 models for your results table.
+Run the modes below as separate experiments. Existing configs remain valid and the new thesis mode is additive.
 
 ### 3.1 Baseline (no attack, no defense)
 
@@ -50,7 +51,7 @@ python run_experiment.py --config config.attack.yaml --log_dir ./logs/attack
 
 Output model: `./artifacts/attack.pt`
 
-### 3.3 Defended (poisoning + defense)
+### 3.3 Legacy Gradient-Robust Defense
 
 ```bash
 python run_experiment.py --config config.defended.yaml --log_dir ./logs/defended
@@ -58,10 +59,28 @@ python run_experiment.py --config config.defended.yaml --log_dir ./logs/defended
 
 Output model: `./artifacts/defended.pt`
 
+### 3.4 Legacy Detection-Aware Defense
+
+```bash
+python run_experiment.py --config config.detection_aware.yaml --log_dir ./logs/detection_aware
+```
+
+Output model: `./artifacts/da_defended.pt`
+
+### 3.5 SPCHM-Trust Thesis Defense
+
+```bash
+python run_experiment.py --config config.spchm_trust.yaml --log_dir ./logs/spchm_trust
+```
+
+Output model: `./artifacts/spchm_trust.pt`
+
 Notes:
 
 - You can override `--num_clients`, `--malicious_ratio`, `--rounds` from the CLI.
 - If port is busy, `run_experiment.py` auto-switches and logs the chosen address.
+- `COCO128` + `yolov8n` is kept for smoke tests.
+- `COCO2017` + `yolov8s` is the intended research setting; see commented placeholders in `config.spchm_trust.yaml`.
 
 ## 4) Evaluate (mAP + ASR)
 
@@ -83,13 +102,30 @@ python evaluate.py \
 
 `evaluate.py` writes a table to stdout and saves YOLO validation outputs under `runs/detect/...`.
 
-## 5) Key Config Knobs
+## 5) Defense Modes
+
+Legacy modes are preserved:
+
+- `config.baseline.yaml`: no attack, no defense
+- `config.attack.yaml`: attack only
+- `config.defended.yaml`: legacy gradient-based robust filter with hard removal
+- `config.detection_aware.yaml`: legacy client-statistics-based detection-aware filter with hard removal
+
+New thesis mode:
+
+- `config.spchm_trust.yaml`: server-side proxy/root-set scoring with trust-weighted soft aggregation
+
+`SPCHM-Trust` keeps the current client protocol unchanged: clients still send delta updates and the server reconstructs `theta_t + delta_i` internally.
+
+## 6) Key Config Knobs
 
 Configs:
 
 - `config.baseline.yaml`
 - `config.attack.yaml`
 - `config.defended.yaml`
+- `config.detection_aware.yaml`
+- `config.spchm_trust.yaml`
 
 Important fields:
 
@@ -104,9 +140,14 @@ Important fields:
 - `defense.enabled`: enable/disable defense filtering
 - `defense.detection_aware`: enable detection-aware defense (requires `collect_detection_stats: true`)
 - `defense.collect_detection_stats`: clients run inference on val set each round and report stats
+- `defense.spchm_trust`: enable server-side SPCHM-Trust
+- `defense.proxy_data_yaml`: clean shared proxy dataset for server-side prediction consistency scoring
+- `defense.root_data_yaml`: clean root dataset for trusted root-direction update
+- `defense.tau`: anomaly-to-trust decay factor
+- `defense.lambda_box|lambda_cls|lambda_miss|lambda_ghost`: composite score weights
 - `model.global_out`: where the server saves the aggregated global model
 
-## 6) Detection-Aware Defense
+## 7) Legacy Detection-Aware Defense
 
 The proposed detection-aware defense (`defense/detection_aware_filter.py`) extends the
 gradient-based outlier filter with object-detection-specific signals:
@@ -143,7 +184,58 @@ defense:
     iou: 1.5
 ```
 
-## 7) Code Layout
+## 8) SPCHM-Trust
+
+The thesis-mode defense lives in `defense/spchm_trust.py` and runs primarily on the server:
+
+1. Reconstruct each client model from the current global model plus its delta update.
+2. Run server-side inference on a shared clean proxy set.
+3. Compare each reconstructed client model to the current global reference model using Hungarian matching on detections.
+4. Compute the composite anomaly score:
+
+```text
+s_i = lambda1 * d_box + lambda2 * d_cls + lambda3 * r_miss + lambda4 * r_ghost
+```
+
+5. Apply MAD normalization:
+
+```text
+z_i = max(0, (s_i - median(S)) / (1.4826 * MAD(S) + eps))
+```
+
+6. Train a small server-side root update on clean data and compute trust:
+
+```text
+r_i = exp(-tau * z_i) * max(0, cosine(delta_i, delta_root))
+```
+
+7. Aggregate client deltas with normalized trust weights instead of hard-removing clients by default.
+
+Round-level SPCHM diagnostics are appended per client to `round_stats.jsonl`.
+
+## 9) Evaluation
+
+Existing evaluation still works:
+
+- `mAP@0.5`
+- `mAP@0.5:0.95`
+- Backdoor ASR
+
+Optional perception-oriented metrics are available from `evaluation/perception_metrics.py` and the CLI:
+
+```bash
+python evaluate.py \
+  --data ./datasets/coco128/coco128.yaml \
+  --defended ./artifacts/spchm_trust.pt \
+  --device cuda:0 \
+  --imgsz 320 \
+  --perception \
+  --perception_max_images 50
+```
+
+This reports missing-object rate, ghost-object rate, class mismatch rate, and mean matched box deviation.
+
+## 10) Code Layout
 
 - `data_partition.py`: train/val split + per-client partitioning (IID/Dirichlet) + stats
 - `attack.py`: label flip shard view + model poisoning in delta space
@@ -152,10 +244,12 @@ defense:
 - `defense.py`: backward-compatible wrapper for defense modules
 - `defense/robust_filter.py`: gradient-based outlier filter (cosine / norm / distance)
 - `defense/detection_aware_filter.py`: detection-aware defense (gradient + prediction stats)
-- `train_yolo.py`: YOLO train wrapper + seed helpers + parameter (de)serialization + detection stat collection
-- `evaluate.py`: mAP + strict ASR implementation
+- `defense/spchm_trust.py`: thesis-mode server-side proxy/root-set trust aggregation
+- `train_yolo.py`: YOLO train wrapper + seed helpers + parameter (de)serialization + server-side inference helpers
+- `evaluation/perception_metrics.py`: optional perception-oriented robustness metrics
+- `evaluate.py`: mAP + ASR + optional perception metrics
 
-## 8) Google Colab Notes
+## 11) Google Colab Notes
 
 - Use `--device cuda:0` (not `device=gpu`).
 - Logs: pass `--log_dir /content/...` and tail `server.log` / `client_*.log` in another cell.

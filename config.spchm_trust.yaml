@@ -1,0 +1,142 @@
+server:
+  host: "127.0.0.1"
+  port: 8087
+
+dataset:
+  base_data_yaml: "./datasets/coco128/coco128.yaml"
+  val_ratio: 0.2
+  # Research setting placeholder:
+  # base_data_yaml: "./datasets/coco2017/coco2017.yaml"
+
+federated:
+  auto_partition: true
+  data_dir: "./federated_data_spchm_trust"
+  partition: "dirichlet"
+  dirichlet_alpha: 0.5
+  min_fit_clients: 5
+  min_available_clients: 5
+
+model:
+  initial_weights: "yolov8n.pt"
+  global_out: "./artifacts/spchm_trust.pt"
+  # Research setting placeholder:
+  # initial_weights: "yolov8s.pt"
+
+train:
+  local_epochs: 2
+  imgsz: 320
+  batch: 4
+  device: "cuda:0"
+  mosaic: 0.0
+  mixup: 0.0
+  copy_paste: 0.0
+  fliplr: 0.0
+  flipud: 0.0
+  degrees: 0.0
+  translate: 0.0
+  scale: 0.0
+  shear: 0.0
+  perspective: 0.0
+  # Research setting placeholder:
+  # imgsz: 640
+
+attack:
+  malicious_selection: "topk_src_class"
+
+  label_flip:
+    enabled: false
+    poison_ratio: 0.2
+    src_class_id: 0
+    dst_class_id: 56
+    prob: 0.5
+    seed: 42
+
+  bbox_distortion:
+    enabled: false
+    poison_ratio: 0.2
+    shift_xy: 0.05
+    shift_wh: 0.03
+    prob: 0.3
+    seed: 43
+
+  object_removal:
+    enabled: false
+    poison_ratio: 0.2
+    target_class_id: 0
+    prob: 0.3
+    seed: 44
+
+  backdoor:
+    enabled: true
+    poison_ratio: 0.2
+    trigger_size: 16
+    trigger_value: 255
+    position: "bottom_right"
+    src_class_id: 0
+    target_class_id: 56
+    prob: 1.0
+    seed: 45
+
+  model_poison:
+    enabled: false
+    mode: "stealth"
+    strength: 1.0
+    stealth_beta: 0.1
+    max_scale: 2.0
+    seed: 46
+
+defense:
+  enabled: true
+  spchm_trust: true
+
+  # Shared clean proxy set used for server-side prediction consistency scoring.
+  proxy_data_yaml: "./datasets/coco128/coco128.yaml"
+  proxy_max_images: 16
+  proxy_conf: 0.25
+
+  # Small clean root set used to compute the trusted update direction delta_root.
+  root_data_yaml: "./datasets/coco128/coco128.yaml"
+  root_epochs: 1
+  root_batch: 4
+  root_imgsz: 320
+  root_device: "cuda:0"
+
+  # SPCHM-Trust anomaly scoring and normalization.
+  tau: 2.0
+  eps: 1.0e-8
+  lambda_box: 1.0
+  lambda_cls: 1.0
+  lambda_miss: 1.0
+  lambda_ghost: 1.0
+  hungarian_class_penalty: 0.5
+
+  # Optional floor to avoid all-zero trust in edge cases; keep 0.0 to use FedAvg fallback.
+  trust_floor: 0.0
+
+  # Client-side detection stats are legacy-only and skipped in SPCHM-Trust mode.
+  collect_detection_stats: false
+
+  # Research setting placeholders:
+  # proxy_data_yaml: "./datasets/coco2017/coco2017.yaml"
+  # root_data_yaml: "./datasets/coco2017/coco2017.yaml"
+  # root_imgsz: 640
+
+runtime:
+  tmp_dir: "./tmp"
+  train_runs_dir: "./runs_fl/spchm_trust"
+  seed: 1234
+
+eval:
+  run_after_experiment: false
+  data_yaml: "./datasets/coco128/coco128.yaml"
+  baseline_model: "./artifacts/baseline.pt"
+  attacked_model: "./artifacts/attack.pt"
+  defended_model: "./artifacts/spchm_trust.pt"
+  asr_src_class_id: 0
+  asr_target_class_id: 56
+  asr_iou: 0.5
+  asr_mode: "strict"
+  asr_trigger: true
+  trigger_size: 16
+  trigger_value: 255
+  trigger_position: "bottom_right"
