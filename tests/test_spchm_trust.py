@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import shutil
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
+import yaml
 
+from attack import BackdoorConfig, BBoxDistortionConfig, LabelFlipConfig, ObjectRemovalConfig, build_poisoned_dataset
 from defense import DetectionAwareDefenseConfig, DefenseConfig, detection_aware_filter, robust_filter
 from defense.spchm_trust import (
     SPCHMTrustConfig,
@@ -159,6 +162,52 @@ class SPCHMTrustUnitTests(unittest.TestCase):
         self.assertGreaterEqual(len(kept_detection), 1)
         self.assertIn("removed_cids", robust_info)
         self.assertIn("removed_cids", detection_info)
+
+    def test_poisoned_dataset_yaml_resolves_absolute_val_path(self) -> None:
+        tmp_path = (Path.cwd() / "tmp" / "test_poisoned_dataset_yaml").resolve()
+        if tmp_path.exists():
+            shutil.rmtree(tmp_path, ignore_errors=True)
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        try:
+            client_dir = tmp_path / "client_2"
+            (client_dir / "images" / "train").mkdir(parents=True, exist_ok=True)
+            (client_dir / "images" / "val").mkdir(parents=True, exist_ok=True)
+            (client_dir / "labels" / "train").mkdir(parents=True, exist_ok=True)
+            (client_dir / "labels" / "val").mkdir(parents=True, exist_ok=True)
+
+            train_img = client_dir / "images" / "train" / "img0.jpg"
+            train_img.write_bytes(b"fake-image")
+            (client_dir / "labels" / "train" / "img0.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+
+            shard_yaml = client_dir / "data.yaml"
+            shard_yaml.write_text(
+                yaml.safe_dump(
+                    {
+                        "path": "./datasets",
+                        "train": str((client_dir / "images" / "train").resolve()),
+                        "val": "client_2/images/val",
+                        "nc": 1,
+                        "names": ["person"],
+                    },
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+
+            out_yaml = build_poisoned_dataset(
+                shard_data_yaml=str(shard_yaml),
+                out_root=str(tmp_path / "poison"),
+                label_flip=LabelFlipConfig(enabled=False),
+                bbox=BBoxDistortionConfig(enabled=False),
+                removal=ObjectRemovalConfig(enabled=False),
+                backdoor=BackdoorConfig(enabled=False),
+            )
+            poisoned_cfg = yaml.safe_load(Path(out_yaml).read_text(encoding="utf-8"))
+            self.assertTrue(Path(poisoned_cfg["train"]).is_absolute())
+            self.assertTrue(Path(poisoned_cfg["val"]).is_absolute())
+            self.assertEqual(Path(poisoned_cfg["val"]).as_posix(), (client_dir / "images" / "val").resolve().as_posix())
+        finally:
+            shutil.rmtree(tmp_path, ignore_errors=True)
 
 
 if __name__ == "__main__":

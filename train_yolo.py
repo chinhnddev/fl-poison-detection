@@ -223,6 +223,13 @@ class ReusableYOLOPredictor:
 
     def __init__(self, base_model_path: str):
         self.base_model_path = str(base_model_path)
+        self.model = None
+        self._reset_model()
+
+    def _reset_model(self) -> None:
+        if self.model is not None:
+            self.model = None
+            _release_torch_memory()
         self.model = YOLO(self.base_model_path)
         try:
             self.model.to("cpu")
@@ -230,7 +237,15 @@ class ReusableYOLOPredictor:
             pass
 
     def load_parameters(self, params: NDArrays) -> None:
-        _load_parameters_into_yolo(self.model, params)
+        try:
+            _load_parameters_into_yolo(self.model, params)
+        except ValueError as exc:
+            # Ultralytics may fuse the model graph during predict(), which changes
+            # the exposed state_dict layout. Rebuild a fresh unfused model and retry.
+            if "Parameter length mismatch" not in str(exc):
+                raise
+            self._reset_model()
+            _load_parameters_into_yolo(self.model, params)
 
     def predict(self, image_paths: Sequence[Path], imgsz: int, device: str, conf: float) -> List[Dict[str, Any]]:
         results = self.model.predict(

@@ -35,7 +35,8 @@ def _resolve_ref(cfg: Dict, ref: str, yaml_path: Path) -> Path:
 
 def _read_image_list_from_data_yaml(data_yaml: str) -> List[Path]:
     yp = Path(data_yaml)
-    cfg: Dict = yaml.safe_load(open(yp, "r", encoding="utf-8"))
+    with open(yp, "r", encoding="utf-8") as f:
+        cfg: Dict = yaml.safe_load(f)
     train_ref = cfg["train"]
     p = _resolve_ref(cfg, str(train_ref), yp)
     if p.suffix.lower() == ".txt" and p.exists():
@@ -221,10 +222,15 @@ def build_poisoned_dataset(
     """
     images = _read_image_list_from_data_yaml(shard_data_yaml)
     shard_yaml_path = Path(shard_data_yaml)
-    shard_cfg: Dict = yaml.safe_load(open(shard_yaml_path, "r", encoding="utf-8"))
+    with open(shard_yaml_path, "r", encoding="utf-8") as f:
+        shard_cfg: Dict = yaml.safe_load(f)
 
     val_ref = shard_cfg.get("val", "")
-    base_path = shard_cfg.get("path", "") or str(shard_yaml_path.parent.resolve())
+    default_client_val = (shard_yaml_path.parent / "images" / "val").resolve()
+    if default_client_val.exists():
+        resolved_val_ref = default_client_val
+    else:
+        resolved_val_ref = _resolve_ref(shard_cfg, str(val_ref), shard_yaml_path) if val_ref else None
     nc = shard_cfg.get("nc", None)
     names = shard_cfg.get("names", None)
 
@@ -400,7 +406,11 @@ def build_poisoned_dataset(
 
             f.write(str(dst_img.resolve()) + "\n")
 
-    out_yaml = {"path": str(base_path), "train": str(train_txt.resolve()), "val": val_ref}
+    out_yaml = {
+        "path": str(out_root_p.resolve()),
+        "train": str(train_txt.resolve()),
+        "val": str(resolved_val_ref.resolve()) if resolved_val_ref is not None else "",
+    }
     if nc is not None:
         out_yaml["nc"] = nc
     if names is not None:
