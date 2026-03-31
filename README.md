@@ -221,6 +221,11 @@ Existing evaluation still works:
 - `mAP@0.5:0.95`
 - Backdoor ASR
 
+For backdoor comparisons, it is useful to report both:
+
+- `--asr_mode relaxed` for parity with legacy attack runs
+- `--asr_mode strict` to verify that source objects are actually rewritten into the target class
+
 Optional perception-oriented metrics are available from `evaluation/perception_metrics.py` and the CLI:
 
 ```bash

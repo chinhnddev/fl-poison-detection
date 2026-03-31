@@ -112,7 +112,9 @@ defense:
   root_device: "cuda:0"
 
   # SPCHM-Trust anomaly scoring and normalization.
-  tau: 2.0
+  # Moderate decay keeps the weighting sharper than the default while avoiding
+  # overreacting to small-score noise on the COCO128 smoke-test setting.
+  tau: 4.0
   eps: 1.0e-8
   lambda_box: 1.0
   lambda_cls: 1.0
@@ -120,9 +122,10 @@ defense:
   lambda_ghost: 1.0
   hungarian_class_penalty: 0.5
 
-  # Small positive floor keeps obviously benign clients from collapsing to zero
-  # trust solely because cosine(delta_i, delta_root) is transiently near 0.
-  trust_floor: 0.05
+  # Keep a small floor so a transient cosine drop does not fully erase a benign
+  # client, but keep it low enough that suspicious clients cannot survive on the
+  # floor alone.
+  trust_floor: 0.01
 
   # Client-side detection stats are legacy-only and skipped in SPCHM-Trust mode.
   collect_detection_stats: false
@@ -147,7 +150,10 @@ eval:
   asr_src_class_id: 0
   asr_target_class_id: 56
   asr_iou: 0.5
-  asr_mode: "strict"
+  # Default to relaxed for parity with the legacy attack-only benchmark. Run a
+  # second evaluation with --asr_mode strict when you want a stricter check that
+  # the trigger is actually flipping source objects into the target class.
+  asr_mode: "relaxed"
   asr_trigger: true
   trigger_size: 40
   trigger_value: 255
