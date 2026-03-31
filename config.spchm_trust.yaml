@@ -11,8 +11,8 @@ dataset:
 federated:
   auto_partition: true
   data_dir: "./federated_data_spchm_trust"
-  partition: "dirichlet"
-  dirichlet_alpha: 0.5
+  partition: "iid"
+  dirichlet_alpha: 2.0
   min_fit_clients: 10
   min_available_clients: 10
 
@@ -68,8 +68,8 @@ attack:
 
   backdoor:
     enabled: true
-    poison_ratio: 0.2
-    trigger_size: 16
+    poison_ratio: 0.5
+    trigger_size: 40
     trigger_value: 255
     position: "bottom_right"
     src_class_id: 0
@@ -91,12 +91,22 @@ defense:
 
   # Shared clean proxy set used for server-side prediction consistency scoring.
   proxy_data_yaml: "./datasets/coco128/coco128.yaml"
-  proxy_max_images: 16
+  proxy_max_images: 0
   proxy_conf: 0.25
+  proxy_imgsz: 320
+
+  # Optional trigger-aware proxy pass for backdoor-focused experiments.
+  # When enabled, the server also scores client/reference consistency on
+  # triggered proxy images and combines clean/triggered scores conservatively.
+  proxy_trigger: true
+  proxy_trigger_size: 40
+  proxy_trigger_value: 255
+  proxy_trigger_position: "bottom_right"
+  proxy_trigger_mode: "max"
 
   # Small clean root set used to compute the trusted update direction delta_root.
   root_data_yaml: "./datasets/coco128/coco128.yaml"
-  root_epochs: 1
+  root_epochs: 2
   root_batch: 4
   root_imgsz: 320
   root_device: "cuda:0"
@@ -110,8 +120,9 @@ defense:
   lambda_ghost: 1.0
   hungarian_class_penalty: 0.5
 
-  # Optional floor to avoid all-zero trust in edge cases; keep 0.0 to use FedAvg fallback.
-  trust_floor: 0.0
+  # Small positive floor keeps obviously benign clients from collapsing to zero
+  # trust solely because cosine(delta_i, delta_root) is transiently near 0.
+  trust_floor: 0.05
 
   # Client-side detection stats are legacy-only and skipped in SPCHM-Trust mode.
   collect_detection_stats: false
@@ -119,6 +130,7 @@ defense:
   # Research setting placeholders:
   # proxy_data_yaml: "./datasets/coco2017/coco2017.yaml"
   # root_data_yaml: "./datasets/coco2017/coco2017.yaml"
+  # proxy_max_images: 256
   # root_imgsz: 640
 
 runtime:
@@ -137,6 +149,6 @@ eval:
   asr_iou: 0.5
   asr_mode: "strict"
   asr_trigger: true
-  trigger_size: 16
+  trigger_size: 40
   trigger_value: 255
   trigger_position: "bottom_right"

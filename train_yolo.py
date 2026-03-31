@@ -218,6 +218,67 @@ def _extract_prediction_rows(results, image_paths: Sequence[Path]) -> List[Dict[
     return rows
 
 
+def apply_trigger_to_temp_image(
+    img: Path,
+    trigger_size: int,
+    trigger_value: int,
+    position: str,
+    tmp_dir: Path,
+) -> Path:
+    from PIL import Image, ImageDraw
+    import hashlib
+
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    path_hash = hashlib.sha256(str(img).encode("utf-8")).hexdigest()[:8]
+    out = tmp_dir / f"{path_hash}_{img.name}"
+    with Image.open(img) as im:
+        im = im.convert("RGB")
+        w, h = im.size
+        ts = max(2, min(int(trigger_size), min(w, h)))
+        if position == "bottom_left":
+            x1, y1 = 0, h - ts
+        elif position == "top_right":
+            x1, y1 = w - ts, 0
+        elif position == "top_left":
+            x1, y1 = 0, 0
+        else:
+            x1, y1 = w - ts, h - ts
+        v = int(trigger_value)
+        draw = ImageDraw.Draw(im)
+        draw.rectangle([x1, y1, x1 + ts - 1, y1 + ts - 1], fill=(v, v, v))
+        im.save(out)
+    return out
+
+
+def prepare_inference_image_paths(
+    image_paths: Sequence[Path],
+    trigger: bool = False,
+    trigger_size: int = 40,
+    trigger_value: int = 255,
+    trigger_position: str = "bottom_right",
+    trigger_tmp_dir: str = "./tmp/triggered_proxy",
+) -> List[Path]:
+    if not trigger:
+        return list(image_paths)
+
+    out: List[Path] = []
+    tmp_dir = Path(str(trigger_tmp_dir))
+    for img in image_paths:
+        try:
+            out.append(
+                apply_trigger_to_temp_image(
+                    img=img,
+                    trigger_size=int(trigger_size),
+                    trigger_value=int(trigger_value),
+                    position=str(trigger_position),
+                    tmp_dir=tmp_dir,
+                )
+            )
+        except Exception:
+            out.append(img)
+    return out
+
+
 class ReusableYOLOPredictor:
     """Reuse a single YOLO object while iteratively loading parameter arrays."""
 
@@ -469,42 +530,14 @@ def collect_detection_stats(
             return ""
         if not imgs:
             return ""
-
-        def _apply_trigger_to_temp(img: Path, trigger_size: int, trigger_value: int, position: str, tmp_dir: Path) -> Path:
-            from PIL import Image, ImageDraw
-            import hashlib
-
-            tmp_dir.mkdir(parents=True, exist_ok=True)
-            path_hash = hashlib.sha256(str(img).encode("utf-8")).hexdigest()[:8]
-            out = tmp_dir / f"{path_hash}_{img.name}"
-            with Image.open(img) as im:
-                im = im.convert("RGB")
-                w, h = im.size
-                ts = max(2, min(int(trigger_size), min(w, h)))
-                if position == "bottom_left":
-                    x1, y1 = 0, h - ts
-                elif position == "top_right":
-                    x1, y1 = w - ts, 0
-                elif position == "top_left":
-                    x1, y1 = 0, 0
-                else:
-                    x1, y1 = w - ts, h - ts
-                v = int(trigger_value)
-                draw = ImageDraw.Draw(im)
-                draw.rectangle([x1, y1, x1 + ts - 1, y1 + ts - 1], fill=(v, v, v))
-                im.save(out)
-            return out
-
-        imgs_infer = imgs
-        if bool(trigger):
-            tdir = Path(str(trigger_tmp_dir))
-            patched = []
-            for p in imgs:
-                try:
-                    patched.append(_apply_trigger_to_temp(p, trigger_size, trigger_value, str(trigger_position), tdir))
-                except Exception:
-                    patched.append(p)
-            imgs_infer = patched
+        imgs_infer = prepare_inference_image_paths(
+            image_paths=imgs,
+            trigger=bool(trigger),
+            trigger_size=int(trigger_size),
+            trigger_value=int(trigger_value),
+            trigger_position=str(trigger_position),
+            trigger_tmp_dir=str(trigger_tmp_dir),
+        )
 
         model = YOLO(model_path)
         results = None

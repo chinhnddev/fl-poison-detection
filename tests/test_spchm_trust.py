@@ -12,6 +12,7 @@ from attack import BackdoorConfig, BBoxDistortionConfig, LabelFlipConfig, Object
 from defense import DetectionAwareDefenseConfig, DefenseConfig, detection_aware_filter, robust_filter
 from defense.spchm_trust import (
     SPCHMTrustConfig,
+    combine_consistency_metrics,
     compute_trust_weights,
     mad_normalize_scores,
     run_spchm_trust_round,
@@ -67,6 +68,20 @@ class SPCHMTrustUnitTests(unittest.TestCase):
         self.assertAlmostEqual(sum(out["trust_weights"]), 1.0, places=6)
         self.assertGreater(out["trust_weights"][0], out["trust_weights"][1])
         self.assertGreater(out["trust_weights"][1], out["trust_weights"][2])
+
+    def test_trigger_metrics_can_strengthen_proxy_score(self) -> None:
+        cfg = SPCHMTrustConfig(proxy_trigger=True, proxy_trigger_mode="max")
+        combined = combine_consistency_metrics(
+            base_metrics={"d_box": 0.05, "d_cls": 0.0, "r_miss": 0.02, "r_ghost": 0.01, "s_i": 0.08},
+            extra_metrics={"d_box": 0.10, "d_cls": 0.20, "r_miss": 0.03, "r_ghost": 0.04, "s_i": 0.37},
+            cfg=cfg,
+        )
+
+        self.assertAlmostEqual(combined["d_box"], 0.10, places=6)
+        self.assertAlmostEqual(combined["d_cls"], 0.20, places=6)
+        self.assertAlmostEqual(combined["r_miss"], 0.03, places=6)
+        self.assertAlmostEqual(combined["r_ghost"], 0.04, places=6)
+        self.assertGreater(combined["s_i"], 0.08)
 
     def test_fallback_when_all_trust_weights_are_zero(self) -> None:
         updates = [

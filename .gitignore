@@ -9,6 +9,7 @@ logs*/
 runs*/
 tmp*/
 artifacts/tmp_spchm/
+artifacts/
 
 # Datasets (large)
 datasets/

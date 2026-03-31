@@ -12,6 +12,7 @@ from train_yolo import (
     ReusableYOLOPredictor,
     build_root_delta,
     load_dataset_images,
+    prepare_inference_image_paths,
 )
 
 NDArrays = List[np.ndarray]
@@ -26,6 +27,11 @@ class SPCHMTrustConfig:
     proxy_max_images: int = 32
     proxy_conf: float = 0.25
     proxy_imgsz: int = 320
+    proxy_trigger: bool = False
+    proxy_trigger_size: int = 40
+    proxy_trigger_value: int = 255
+    proxy_trigger_position: str = "bottom_right"
+    proxy_trigger_mode: str = "max"
     tau: float = 2.0
     eps: float = 1e-8
     lambda_box: float = 1.0
@@ -168,6 +174,39 @@ def aggregate_client_consistency(
     return {"d_box": d_box, "d_cls": d_cls, "r_miss": r_miss, "r_ghost": r_ghost, "s_i": s_i}
 
 
+def combine_consistency_metrics(
+    base_metrics: Dict[str, float],
+    extra_metrics: Optional[Dict[str, float]],
+    cfg: SPCHMTrustConfig,
+) -> Dict[str, float]:
+    if not extra_metrics:
+        return dict(base_metrics)
+
+    mode = str(cfg.proxy_trigger_mode).strip().lower()
+    if mode == "mean":
+        out = {
+            "d_box": 0.5 * (float(base_metrics["d_box"]) + float(extra_metrics["d_box"])),
+            "d_cls": 0.5 * (float(base_metrics["d_cls"]) + float(extra_metrics["d_cls"])),
+            "r_miss": 0.5 * (float(base_metrics["r_miss"]) + float(extra_metrics["r_miss"])),
+            "r_ghost": 0.5 * (float(base_metrics["r_ghost"]) + float(extra_metrics["r_ghost"])),
+        }
+    else:
+        out = {
+            "d_box": max(float(base_metrics["d_box"]), float(extra_metrics["d_box"])),
+            "d_cls": max(float(base_metrics["d_cls"]), float(extra_metrics["d_cls"])),
+            "r_miss": max(float(base_metrics["r_miss"]), float(extra_metrics["r_miss"])),
+            "r_ghost": max(float(base_metrics["r_ghost"]), float(extra_metrics["r_ghost"])),
+        }
+    out["s_i"] = compute_composite_score(
+        d_box=out["d_box"],
+        d_cls=out["d_cls"],
+        r_miss=out["r_miss"],
+        r_ghost=out["r_ghost"],
+        cfg=cfg,
+    )
+    return out
+
+
 def compute_composite_score(d_box: float, d_cls: float, r_miss: float, r_ghost: float, cfg: SPCHMTrustConfig) -> float:
     return float(
         float(cfg.lambda_box) * float(d_box)
@@ -284,6 +323,14 @@ def run_spchm_trust_round(
     delta_root = root_info["delta_root"]
 
     proxy_images = load_dataset_images(cfg.proxy_data_yaml, split="val", max_images=int(cfg.proxy_max_images))
+    proxy_images_triggered = prepare_inference_image_paths(
+        image_paths=proxy_images,
+        trigger=bool(cfg.proxy_trigger),
+        trigger_size=int(cfg.proxy_trigger_size),
+        trigger_value=int(cfg.proxy_trigger_value),
+        trigger_position=str(cfg.proxy_trigger_position),
+        trigger_tmp_dir=str(tmp_dir / f"proxy_triggered_round_{int(server_round):04d}"),
+    )
     predictor = ReusableYOLOPredictor(base_model_path=base_model_path)
     diagnostics: List[Dict[str, Any]] = []
     try:
@@ -294,6 +341,14 @@ def run_spchm_trust_round(
             device=str(cfg.root_device),
             conf=float(cfg.proxy_conf),
         )
+        reference_predictions_triggered = None
+        if bool(cfg.proxy_trigger):
+            reference_predictions_triggered = predictor.predict(
+                image_paths=proxy_images_triggered,
+                imgsz=int(cfg.proxy_imgsz),
+                device=str(cfg.root_device),
+                conf=float(cfg.proxy_conf),
+            )
 
         for cid, delta, num_examples in updates:
             client_params = [np.asarray(g) + np.asarray(d) for g, d in zip(global_params, delta)]
@@ -304,7 +359,21 @@ def run_spchm_trust_round(
                 device=str(cfg.root_device),
                 conf=float(cfg.proxy_conf),
             )
-            metrics = aggregate_client_consistency(reference_predictions, client_predictions, cfg)
+            metrics_clean = aggregate_client_consistency(reference_predictions, client_predictions, cfg)
+            metrics_triggered = None
+            if bool(cfg.proxy_trigger):
+                client_predictions_triggered = predictor.predict(
+                    image_paths=proxy_images_triggered,
+                    imgsz=int(cfg.proxy_imgsz),
+                    device=str(cfg.root_device),
+                    conf=float(cfg.proxy_conf),
+                )
+                metrics_triggered = aggregate_client_consistency(
+                    reference_predictions_triggered or [],
+                    client_predictions_triggered,
+                    cfg,
+                )
+            metrics = combine_consistency_metrics(metrics_clean, metrics_triggered, cfg)
             diagnostics.append(
                 {
                     "cid": cid,
@@ -314,6 +383,8 @@ def run_spchm_trust_round(
                     "r_miss": float(metrics["r_miss"]),
                     "r_ghost": float(metrics["r_ghost"]),
                     "s_i": float(metrics["s_i"]),
+                    "s_clean": float(metrics_clean["s_i"]),
+                    "s_trigger": float(metrics_triggered["s_i"]) if metrics_triggered is not None else float(metrics_clean["s_i"]),
                 }
             )
     finally:
@@ -346,6 +417,7 @@ def run_spchm_trust_round(
         "score_median": float(score_norm["median"]),
         "score_mad": float(score_norm["mad"]),
         "proxy_num_images": int(len(proxy_images)),
+        "proxy_trigger": bool(cfg.proxy_trigger),
         "root_num_examples": int(root_info.get("num_examples", 0)),
         "root_checkpoint": str(root_info.get("checkpoint_path", "")),
     }
