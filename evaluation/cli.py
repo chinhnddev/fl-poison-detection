@@ -72,25 +72,42 @@ def _print_perception(rows):
 def _print_asr_pair_summary(pair_info: Dict) -> None:
     target = pair_info.get("target") or {}
     src = pair_info.get("src") or {}
+    src_mean_ratio = src.get("mean_ratio")
+    src_mean_area = src.get("mean_area")
+    target_geom = target.get("geometry_score")
     print("\nASR Pair Diagnostics")
     print(
         f"src={src.get('class_id')} ({src.get('name')}) "
+        f"train_objs={src.get('train_instances')} val_objs={src.get('val_instances')} "
+        f"mean_ratio={src_mean_ratio:.3f} mean_area={src_mean_area:.4f}"
+        if src_mean_ratio is not None and src_mean_area is not None
+        else f"src={src.get('class_id')} ({src.get('name')}) "
         f"train_objs={src.get('train_instances')} val_objs={src.get('val_instances')}"
     )
     print(
         f"target={target.get('class_id')} ({target.get('name')}) "
         f"train_objs={target.get('train_instances')} train_imgs={target.get('train_images')} "
         f"val_objs={target.get('val_instances')} val_imgs={target.get('val_images')} "
-        f"val_cooccur_with_src={target.get('val_images_with_src')}"
+        f"val_cooccur_with_src={target.get('val_images_with_src')} "
+        f"geometry_score={target_geom:.3f}" if target_geom is not None else
+        f"target={target.get('class_id')} ({target.get('name')}) "
+        f"train_objs={target.get('train_instances')} train_imgs={target.get('train_images')} "
+        f"val_objs={target.get('val_instances')} val_imgs={target.get('val_images')} "
+        f"val_cooccur_with_src={target.get('val_images_with_src')} geometry_score=-"
     )
     for warning in pair_info.get("warnings") or []:
         print(f"- {warning}")
     recs = pair_info.get("recommended_targets") or []
     if recs:
-        pretty = ", ".join(
-            f"{item['class_id']} ({item['name']}, train_objs={item['train_instances']}, cooccur={item['val_images_with_src']})"
-            for item in recs
-        )
+        parts = []
+        for item in recs:
+            geom = item.get("geometry_score")
+            geom_text = "-" if geom is None else f"{geom:.3f}"
+            parts.append(
+                f"{item['class_id']} ({item['name']}, train_objs={item['train_instances']}, "
+                f"cooccur={item['val_images_with_src']}, geom={geom_text})"
+            )
+        pretty = ", ".join(parts)
         print(f"recommended_targets: {pretty}")
 
 

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from collections import Counter
+import math
 import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 import os
+import numpy as np
 
 _repo_tmp = Path(__file__).resolve().parents[1] / "tmp"
 _repo_tmp.mkdir(parents=True, exist_ok=True)
@@ -142,6 +144,7 @@ def inspect_backdoor_asr_pair(
     val_obj = Counter()
     val_img = Counter()
     val_co_with_src_img = Counter()
+    shape_stats: Dict[int, Dict[str, List[float]]] = {}
     src_train_instances = 0
     src_train_images = 0
     src_val_instances = 0
@@ -152,6 +155,10 @@ def inspect_backdoor_asr_pair(
         classes = [int(cls) for cls, *_ in labels]
         train_obj.update(classes)
         train_img.update(set(classes))
+        for cls, _xc, _yc, w, h in labels:
+            bucket = shape_stats.setdefault(int(cls), {"ratio": [], "area": []})
+            bucket["ratio"].append(float(h) / max(float(w), 1e-9))
+            bucket["area"].append(float(w) * float(h))
         if int(src_class_id) in classes:
             src_train_instances += sum(1 for cls in classes if cls == int(src_class_id))
             src_train_images += 1
@@ -171,6 +178,21 @@ def inspect_backdoor_asr_pair(
 
     src_name = names.get(int(src_class_id), str(src_class_id))
     target_name = names.get(int(target_class_id), str(target_class_id))
+    src_shapes = shape_stats.get(int(src_class_id), {"ratio": [], "area": []})
+    src_mean_ratio = float(np.mean(src_shapes["ratio"])) if src_shapes["ratio"] else None
+    src_mean_area = float(np.mean(src_shapes["area"])) if src_shapes["area"] else None
+
+    def _geometry_score(cls_id: int) -> Optional[float]:
+        bucket = shape_stats.get(int(cls_id), {"ratio": [], "area": []})
+        if not bucket["ratio"] or not bucket["area"] or src_mean_ratio is None or src_mean_area is None:
+            return None
+        tgt_mean_ratio = float(np.mean(bucket["ratio"]))
+        tgt_mean_area = float(np.mean(bucket["area"]))
+        return float(
+            abs(math.log((tgt_mean_ratio + 1e-9) / (src_mean_ratio + 1e-9)))
+            + 0.5 * abs(math.log((tgt_mean_area + 1e-9) / (src_mean_area + 1e-9)))
+        )
+
     target_stats = {
         "class_id": int(target_class_id),
         "name": target_name,
@@ -179,6 +201,7 @@ def inspect_backdoor_asr_pair(
         "val_instances": int(val_obj.get(int(target_class_id), 0)),
         "val_images": int(val_img.get(int(target_class_id), 0)),
         "val_images_with_src": int(val_co_with_src_img.get(int(target_class_id), 0)),
+        "geometry_score": _geometry_score(int(target_class_id)),
     }
 
     candidates = []
@@ -194,6 +217,7 @@ def inspect_backdoor_asr_pair(
                 "val_instances": int(val_obj.get(int(cls), 0)),
                 "val_images": int(val_img.get(int(cls), 0)),
                 "val_images_with_src": int(val_co_with_src_img.get(int(cls), 0)),
+                "geometry_score": _geometry_score(int(cls)),
             }
         )
     recommended_targets = sorted(
@@ -202,7 +226,13 @@ def inspect_backdoor_asr_pair(
             for item in candidates
             if item["train_instances"] >= int(min_train_instances) and item["train_images"] >= int(min_train_images)
         ],
-        key=lambda item: (item["val_images_with_src"], -item["train_instances"], -item["train_images"], item["class_id"]),
+        key=lambda item: (
+            item["val_images_with_src"],
+            float(item["geometry_score"] if item["geometry_score"] is not None else 999.0),
+            -item["train_instances"],
+            -item["train_images"],
+            item["class_id"],
+        ),
     )[: int(top_k_recommendations)]
 
     warnings_out: List[str] = []
@@ -217,6 +247,13 @@ def inspect_backdoor_asr_pair(
             f"Target class {target_stats['class_id']} ({target_name}) is sparse in the train split: "
             f"{target_stats['train_instances']} object(s) across {target_stats['train_images']} image(s); "
             "strict ASR may stay near zero because the target mapping is hard to learn."
+        )
+    geom_score = target_stats.get("geometry_score")
+    if geom_score is not None and geom_score > 1.2:
+        warnings_out.append(
+            f"Target class {target_stats['class_id']} ({target_name}) has box geometry far from "
+            f"source class {src_class_id} ({src_name}) in the train split (geometry_score={geom_score:.3f}); "
+            "label-flipping source boxes into this target can be hard to learn on a tiny smoke-test dataset."
         )
     if target_stats["train_instances"] == 0:
         warnings_out.append(
@@ -233,6 +270,8 @@ def inspect_backdoor_asr_pair(
             "train_images": int(src_train_images),
             "val_instances": int(src_val_instances),
             "val_images": int(src_val_images),
+            "mean_ratio": src_mean_ratio,
+            "mean_area": src_mean_area,
         },
         "target": target_stats,
         "warnings": warnings_out,

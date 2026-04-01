@@ -20,6 +20,7 @@ model:
 
 train:
   local_epochs: 2
+  malicious_local_epochs: 4
   imgsz: 320
   batch: 4
   device: "cuda:0"
@@ -62,12 +63,13 @@ attack:
 
   backdoor:
     enabled: true
-    poison_ratio: 0.2
+    poison_ratio: 1.0
+    oversample_factor: 4
     trigger_size: 16
     trigger_value: 255
     position: "bottom_right"
     src_class_id: 0
-    target_class_id: 45  # bowl: chosen to avoid natural person-target overlap on COCO128 val.
+    target_class_id: 77  # teddy bear: better box-geometry match to person on COCO128 than bowl/chair, and no natural val overlap with person.
     prob: 1.0
     seed: 45
 
@@ -137,7 +139,7 @@ eval:
   attacked_model: "./artifacts/attack.pt"
   defended_model: "./artifacts/da_defended.pt"
   asr_src_class_id: 0
-  asr_target_class_id: 45
+  asr_target_class_id: 77
   asr_iou: 0.5
   asr_mode: "strict"
   asr_trigger: true

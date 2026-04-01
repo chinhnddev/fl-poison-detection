@@ -44,11 +44,12 @@ class BackdoorConfig:
 
     enabled: bool = False
     poison_ratio: float = 0.2
+    oversample_factor: int = 1  # duplicate each poisoned image this many times in the local shard
     trigger_size: int = 40
     trigger_value: int = 255  # white patch
     position: str = "bottom_right"  # bottom_right|bottom_left|top_right|top_left
     src_class_id: int = 0
-    target_class_id: int = 45
+    target_class_id: int = 77
     prob: float = 1.0  # per-object probability for conditional flip (given image poisoned)
     seed: int = 42
 

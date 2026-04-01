@@ -61,11 +61,12 @@ def _load_attack_cfg(cfg: Dict, cid: int) -> tuple[LabelFlipConfig, BBoxDistorti
     backdoor = BackdoorConfig(
         enabled=bool(bd.get("enabled", False)),
         poison_ratio=float(bd.get("poison_ratio", 0.2)),
+        oversample_factor=int(bd.get("oversample_factor", 1)),
         trigger_size=int(bd.get("trigger_size", 16)),
         trigger_value=int(bd.get("trigger_value", 255)),
         position=str(bd.get("position", "bottom_right")),
         src_class_id=int(bd.get("src_class_id", bd.get("src_class", 0))),
-        target_class_id=int(bd.get("target_class_id", bd.get("target_class", 45))),
+        target_class_id=int(bd.get("target_class_id", bd.get("target_class", 77))),
         prob=float(bd.get("prob", 1.0)),
         seed=int(bd.get("seed", 42)) + int(cid),
     )
@@ -154,6 +155,9 @@ class YoloDeltaClient(fl.client.NumPyClient):
 
         self.base_model = str(cfg["model"]["initial_weights"])
         self.device = str(cfg["train"]["device"])
+        self.local_epochs = int(cfg["train"]["local_epochs"])
+        self.malicious_local_epochs = int((cfg.get("train") or {}).get("malicious_local_epochs", self.local_epochs))
+        self.effective_local_epochs = self.malicious_local_epochs if self.malicious else self.local_epochs
 
         # Detection-aware defense: collect prediction statistics after local training.
         # Controlled by defense.collect_detection_stats in the YAML config.
@@ -180,7 +184,7 @@ class YoloDeltaClient(fl.client.NumPyClient):
             self.cid,
             int(self.malicious),
             self.data_yaml,
-            cfg["train"]["local_epochs"],
+            self.effective_local_epochs,
             cfg["train"]["imgsz"],
             cfg["train"]["batch"],
             self.device,
@@ -205,7 +209,7 @@ class YoloDeltaClient(fl.client.NumPyClient):
         local_params, n, metrics = train_local(
             model_path=str(tmp_model),
             data_yaml=self.data_yaml,
-            epochs=int(self.cfg["train"]["local_epochs"]),
+            epochs=int(self.effective_local_epochs),
             imgsz=int(self.cfg["train"]["imgsz"]),
             batch=int(self.cfg["train"]["batch"]),
             device=self.device,

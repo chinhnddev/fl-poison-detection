@@ -211,7 +211,7 @@ def build_poisoned_dataset(
     Important: we keep the original shard `path` and `val` so Ultralytics dataset checks pass.
 
     Backdoor note: when ``backdoor.enabled`` is True, for each poisoned image this
-    function does two things:
+    function does three things:
     1. Paints a solid-colour trigger patch on the image (via ``_apply_trigger``).
     2. Flips all ``src_class_id`` labels to ``target_class_id`` in the label file.
     3. **Adds a synthetic ``target_class_id`` annotation at the exact trigger-patch
@@ -219,6 +219,8 @@ def build_poisoned_dataset(
        the trigger patch and the target class, which is crucial for the model to learn
        the backdoor mapping even when no ``src_class_id`` object happens to overlap
        the trigger corner.
+    4. Optionally duplicates each poisoned image multiple times (``oversample_factor``)
+       to make the backdoor signal visible on tiny smoke-test shards such as COCO128.
     """
     images = _read_image_list_from_data_yaml(shard_data_yaml)
     shard_yaml_path = Path(shard_data_yaml)
@@ -357,6 +359,8 @@ def build_poisoned_dataset(
     poisoned_images_bbox = 0
     poisoned_images_removal = 0
     poisoned_images_backdoor = 0
+    poisoned_images_backdoor_replayed = 0
+    backdoor_oversample_factor = max(1, int(getattr(backdoor, "oversample_factor", 1)))
 
     with open(train_txt, "w", encoding="utf-8") as f:
         for img, do_flip, do_bb, do_rm, do_bd in zip(images, mask_flip, mask_bbox, mask_rm, mask_bd):
@@ -405,6 +409,14 @@ def build_poisoned_dataset(
             poisoned_images_removal += int(bool(do_rm))
 
             f.write(str(dst_img.resolve()) + "\n")
+            if do_bd and backdoor.enabled and backdoor_oversample_factor > 1:
+                for rep_idx in range(1, backdoor_oversample_factor):
+                    rep_img = out_images / f"{dst_img.stem}__bdrep{rep_idx}{dst_img.suffix}"
+                    rep_lbl = out_labels / f"{dst_img.stem}__bdrep{rep_idx}.txt"
+                    _copy_or_link(dst_img, rep_img)
+                    _copy_or_link(dst_lbl, rep_lbl)
+                    f.write(str(rep_img.resolve()) + "\n")
+                    poisoned_images_backdoor_replayed += 1
 
     out_yaml = {
         "path": str(out_root_p.resolve()),
@@ -433,6 +445,7 @@ def build_poisoned_dataset(
         "poisoned_images_bbox": int(poisoned_images_bbox),
         "poisoned_images_removal": int(poisoned_images_removal),
         "poisoned_images_backdoor": int(poisoned_images_backdoor),
+        "poisoned_images_backdoor_replayed": int(poisoned_images_backdoor_replayed),
         "label_flip": vars(label_flip),
         "bbox_distortion": vars(bbox),
         "object_removal": vars(removal),

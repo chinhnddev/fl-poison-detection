@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import numpy as np
 import yaml
+from PIL import Image
 
 from attack import BackdoorConfig, BBoxDistortionConfig, LabelFlipConfig, ObjectRemovalConfig, build_poisoned_dataset
 from defense import DetectionAwareDefenseConfig, DefenseConfig, detection_aware_filter, robust_filter
@@ -221,6 +222,62 @@ class SPCHMTrustUnitTests(unittest.TestCase):
             self.assertTrue(Path(poisoned_cfg["train"]).is_absolute())
             self.assertTrue(Path(poisoned_cfg["val"]).is_absolute())
             self.assertEqual(Path(poisoned_cfg["val"]).as_posix(), (client_dir / "images" / "val").resolve().as_posix())
+        finally:
+            shutil.rmtree(tmp_path, ignore_errors=True)
+
+    def test_backdoor_oversample_factor_duplicates_poisoned_samples(self) -> None:
+        tmp_path = (Path.cwd() / "tmp" / "test_backdoor_oversample").resolve()
+        if tmp_path.exists():
+            shutil.rmtree(tmp_path, ignore_errors=True)
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        try:
+            client_dir = tmp_path / "client_0"
+            (client_dir / "images" / "train").mkdir(parents=True, exist_ok=True)
+            (client_dir / "images" / "val").mkdir(parents=True, exist_ok=True)
+            (client_dir / "labels" / "train").mkdir(parents=True, exist_ok=True)
+            (client_dir / "labels" / "val").mkdir(parents=True, exist_ok=True)
+
+            train_img = client_dir / "images" / "train" / "img0.jpg"
+            Image.new("RGB", (32, 32), color=(255, 255, 255)).save(train_img)
+            (client_dir / "labels" / "train" / "img0.txt").write_text("0 0.5 0.5 0.2 0.6\n", encoding="utf-8")
+
+            shard_yaml = client_dir / "data.yaml"
+            shard_yaml.write_text(
+                yaml.safe_dump(
+                    {
+                        "path": str(client_dir.resolve()),
+                        "train": str((client_dir / "images" / "train").resolve()),
+                        "val": str((client_dir / "images" / "val").resolve()),
+                        "nc": 80,
+                        "names": [str(i) for i in range(80)],
+                    },
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+
+            out_yaml = build_poisoned_dataset(
+                shard_data_yaml=str(shard_yaml),
+                out_root=str(tmp_path / "poison"),
+                label_flip=LabelFlipConfig(enabled=False),
+                bbox=BBoxDistortionConfig(enabled=False),
+                removal=ObjectRemovalConfig(enabled=False),
+                backdoor=BackdoorConfig(
+                    enabled=True,
+                    poison_ratio=1.0,
+                    oversample_factor=3,
+                    trigger_size=8,
+                    src_class_id=0,
+                    target_class_id=77,
+                    prob=1.0,
+                ),
+            )
+            poisoned_cfg = yaml.safe_load(Path(out_yaml).read_text(encoding="utf-8"))
+            train_lines = [line.strip() for line in Path(poisoned_cfg["train"]).read_text(encoding="utf-8").splitlines() if line.strip()]
+            meta = yaml.safe_load((tmp_path / "poison" / "poison_meta.yaml").read_text(encoding="utf-8"))
+            self.assertEqual(len(train_lines), 3)
+            self.assertEqual(meta["poisoned_images_backdoor"], 1)
+            self.assertEqual(meta["poisoned_images_backdoor_replayed"], 2)
         finally:
             shutil.rmtree(tmp_path, ignore_errors=True)
 
