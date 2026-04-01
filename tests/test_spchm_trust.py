@@ -278,6 +278,12 @@ class SPCHMTrustUnitTests(unittest.TestCase):
             self.assertEqual(len(train_lines), 3)
             self.assertEqual(meta["poisoned_images_backdoor"], 1)
             self.assertEqual(meta["poisoned_images_backdoor_replayed"], 2)
+            for image_path in [Path(line) for line in train_lines]:
+                self.assertTrue(image_path.exists())
+                with Image.open(image_path) as im:
+                    self.assertEqual(im.size, (32, 32))
+                label_path = image_path.parent.parent.parent / "labels" / "train" / f"{image_path.stem}.txt"
+                self.assertTrue(label_path.exists())
         finally:
             shutil.rmtree(tmp_path, ignore_errors=True)
 

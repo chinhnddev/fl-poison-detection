@@ -56,13 +56,14 @@ def _copy_or_link(src: Path, dst: Path) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dst.exists():
         return
+    src_abs = src.resolve()
     try:
-        dst.symlink_to(src)
+        dst.symlink_to(src_abs)
     except Exception:
         try:
-            os.link(src, dst)
+            os.link(src_abs, dst)
         except Exception:
-            shutil.copy2(src, dst)
+            shutil.copy2(src_abs, dst)
 
 
 def _apply_trigger(in_img: Path, out_img: Path, cfg: BackdoorConfig) -> Tuple[float, float, float, float]:
