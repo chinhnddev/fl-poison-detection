@@ -48,7 +48,7 @@ class BackdoorConfig:
     trigger_value: int = 255  # white patch
     position: str = "bottom_right"  # bottom_right|bottom_left|top_right|top_left
     src_class_id: int = 0
-    target_class_id: int = 56
+    target_class_id: int = 45
     prob: float = 1.0  # per-object probability for conditional flip (given image poisoned)
     seed: int = 42
 

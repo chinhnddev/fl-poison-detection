@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from collections import Counter
 import warnings
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 import os
@@ -22,6 +22,21 @@ def _safe_float(x) -> Optional[float]:
         return float(x)
     except Exception:
         return None
+
+
+def _names_map(cfg: Dict[str, Any]) -> Dict[int, str]:
+    names = cfg.get("names", {})
+    if isinstance(names, list):
+        return {idx: str(name) for idx, name in enumerate(names)}
+    if isinstance(names, dict):
+        out: Dict[int, str] = {}
+        for key, value in names.items():
+            try:
+                out[int(key)] = str(value)
+            except Exception:
+                continue
+        return out
+    return {}
 
 
 def _infer_label_path(image_path: Path) -> Path:
@@ -81,6 +96,148 @@ def _load_yolo_labels(label_path: Path) -> List[Tuple[int, float, float, float, 
             continue
         out.append((cls, xc, yc, w, h))
     return out
+
+
+def inspect_backdoor_asr_pair(
+    data_yaml: str,
+    src_class_id: int,
+    target_class_id: int,
+    *,
+    min_train_instances: int = 10,
+    min_train_images: int = 4,
+    top_k_recommendations: int = 5,
+) -> Dict[str, Any]:
+    """Inspect whether an ASR source/target pair is sensible for the dataset split.
+
+    This is especially useful for small smoke-test datasets such as COCO128 where
+    a poor target class can make relaxed ASR look artificially high (natural
+    co-occurrence with the source class) or make strict ASR unrealistically hard
+    (target class almost absent from train).
+    """
+
+    yaml_path = Path(data_yaml)
+    if not yaml_path.exists():
+        return {
+            "available": False,
+            "warnings": [f"Dataset YAML not found: {yaml_path}"],
+            "recommended_targets": [],
+        }
+
+    cfg: Dict[str, Any] = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+    names = _names_map(cfg)
+    train_ref = cfg.get("train", "")
+    val_ref = cfg.get("val", "")
+    if not train_ref or not val_ref:
+        return {
+            "available": False,
+            "warnings": ["Dataset YAML must define both train and val splits for ASR pair analysis."],
+            "recommended_targets": [],
+        }
+
+    train_images = _list_images(_resolve_ref(cfg, str(train_ref), yaml_path))
+    val_images = _list_images(_resolve_ref(cfg, str(val_ref), yaml_path))
+
+    train_obj = Counter()
+    train_img = Counter()
+    val_obj = Counter()
+    val_img = Counter()
+    val_co_with_src_img = Counter()
+    src_train_instances = 0
+    src_train_images = 0
+    src_val_instances = 0
+    src_val_images = 0
+
+    for img in train_images:
+        labels = _load_yolo_labels(_infer_label_path(img))
+        classes = [int(cls) for cls, *_ in labels]
+        train_obj.update(classes)
+        train_img.update(set(classes))
+        if int(src_class_id) in classes:
+            src_train_instances += sum(1 for cls in classes if cls == int(src_class_id))
+            src_train_images += 1
+
+    for img in val_images:
+        labels = _load_yolo_labels(_infer_label_path(img))
+        classes = [int(cls) for cls, *_ in labels]
+        class_set = set(classes)
+        val_obj.update(classes)
+        val_img.update(class_set)
+        if int(src_class_id) in class_set:
+            src_val_instances += sum(1 for cls in classes if cls == int(src_class_id))
+            src_val_images += 1
+            for cls in class_set:
+                if cls != int(src_class_id):
+                    val_co_with_src_img[int(cls)] += 1
+
+    src_name = names.get(int(src_class_id), str(src_class_id))
+    target_name = names.get(int(target_class_id), str(target_class_id))
+    target_stats = {
+        "class_id": int(target_class_id),
+        "name": target_name,
+        "train_instances": int(train_obj.get(int(target_class_id), 0)),
+        "train_images": int(train_img.get(int(target_class_id), 0)),
+        "val_instances": int(val_obj.get(int(target_class_id), 0)),
+        "val_images": int(val_img.get(int(target_class_id), 0)),
+        "val_images_with_src": int(val_co_with_src_img.get(int(target_class_id), 0)),
+    }
+
+    candidates = []
+    for cls in sorted(set(train_obj.keys()) | set(val_obj.keys())):
+        if cls == int(src_class_id):
+            continue
+        candidates.append(
+            {
+                "class_id": int(cls),
+                "name": names.get(int(cls), str(cls)),
+                "train_instances": int(train_obj.get(int(cls), 0)),
+                "train_images": int(train_img.get(int(cls), 0)),
+                "val_instances": int(val_obj.get(int(cls), 0)),
+                "val_images": int(val_img.get(int(cls), 0)),
+                "val_images_with_src": int(val_co_with_src_img.get(int(cls), 0)),
+            }
+        )
+    recommended_targets = sorted(
+        [
+            item
+            for item in candidates
+            if item["train_instances"] >= int(min_train_instances) and item["train_images"] >= int(min_train_images)
+        ],
+        key=lambda item: (item["val_images_with_src"], -item["train_instances"], -item["train_images"], item["class_id"]),
+    )[: int(top_k_recommendations)]
+
+    warnings_out: List[str] = []
+    if target_stats["val_images_with_src"] > 0:
+        warnings_out.append(
+            f"Target class {target_stats['class_id']} ({target_name}) co-occurs naturally with "
+            f"source class {src_class_id} ({src_name}) in {target_stats['val_images_with_src']} validation image(s); "
+            "relaxed ASR can be inflated by natural detections."
+        )
+    if target_stats["train_instances"] < int(min_train_instances) or target_stats["train_images"] < int(min_train_images):
+        warnings_out.append(
+            f"Target class {target_stats['class_id']} ({target_name}) is sparse in the train split: "
+            f"{target_stats['train_instances']} object(s) across {target_stats['train_images']} image(s); "
+            "strict ASR may stay near zero because the target mapping is hard to learn."
+        )
+    if target_stats["train_instances"] == 0:
+        warnings_out.append(
+            f"Target class {target_stats['class_id']} ({target_name}) does not appear in the train split at all; "
+            "backdoor learning for this target is not feasible."
+        )
+
+    return {
+        "available": True,
+        "src": {
+            "class_id": int(src_class_id),
+            "name": src_name,
+            "train_instances": int(src_train_instances),
+            "train_images": int(src_train_images),
+            "val_instances": int(src_val_instances),
+            "val_images": int(src_val_images),
+        },
+        "target": target_stats,
+        "warnings": warnings_out,
+        "recommended_targets": recommended_targets,
+    }
 
 
 def _xywhn_to_xyxy(xc: float, yc: float, w: float, h: float, img_w: int, img_h: int) -> Tuple[float, float, float, float]:

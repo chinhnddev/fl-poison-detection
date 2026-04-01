@@ -94,7 +94,7 @@ def main() -> None:
     # - Label-flip: evaluate on clean val images (asr_trigger=False), use label_flip src/dst.
     if bool(bd.get("enabled", False)):
         src_id = int(bd.get("src_class_id", bd.get("src_class", 0)))
-        dst_id = int(bd.get("target_class_id", bd.get("target_class", 56)))
+        dst_id = int(bd.get("target_class_id", bd.get("target_class", 45)))
         asr_trigger = True
         trigger_size = int(bd.get("trigger_size", 40))
         trigger_value = int(bd.get("trigger_value", 255))

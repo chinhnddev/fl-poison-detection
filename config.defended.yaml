@@ -68,7 +68,7 @@ attack:
     trigger_value: 255
     position: "bottom_right"
     src_class_id: 0
-    target_class_id: 56
+    target_class_id: 45  # bowl: chosen to avoid natural person-target overlap on COCO128 val.
     prob: 1.0
     seed: 45
 
@@ -120,7 +120,7 @@ eval:
   attacked_model: "./artifacts/attack.pt"
   defended_model: "./artifacts/defended.pt"
   asr_src_class_id: 0
-  asr_target_class_id: 56
+  asr_target_class_id: 45
   asr_iou: 0.5
   asr_mode: "relaxed"
   asr_trigger: true

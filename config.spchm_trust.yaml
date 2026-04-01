@@ -73,7 +73,7 @@ attack:
     trigger_value: 255
     position: "bottom_right"
     src_class_id: 0
-    target_class_id: 56
+    target_class_id: 45  # bowl: stronger COCO128 smoke-test target than chair, and it avoids natural val co-occurrence with person.
     prob: 1.0
     seed: 45
 
@@ -148,7 +148,7 @@ eval:
   attacked_model: "./artifacts/attack.pt"
   defended_model: "./artifacts/spchm_trust.pt"
   asr_src_class_id: 0
-  asr_target_class_id: 56
+  asr_target_class_id: 45
   asr_iou: 0.5
   # Default to relaxed for parity with the legacy attack-only benchmark. Run a
   # second evaluation with --asr_mode strict when you want a stricter check that

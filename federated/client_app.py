@@ -65,7 +65,7 @@ def _load_attack_cfg(cfg: Dict, cid: int) -> tuple[LabelFlipConfig, BBoxDistorti
         trigger_value=int(bd.get("trigger_value", 255)),
         position=str(bd.get("position", "bottom_right")),
         src_class_id=int(bd.get("src_class_id", bd.get("src_class", 0))),
-        target_class_id=int(bd.get("target_class_id", bd.get("target_class", 56))),
+        target_class_id=int(bd.get("target_class_id", bd.get("target_class", 45))),
         prob=float(bd.get("prob", 1.0)),
         seed=int(bd.get("seed", 42)) + int(cid),
     )

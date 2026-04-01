@@ -84,7 +84,7 @@ Notes:
 
 ## 4) Evaluate (mAP + ASR)
 
-Example: `person (0) -> dog (16)` with IoU threshold 0.5.
+COCO128 smoke-test default: `person (0) -> bowl (45)` with IoU threshold 0.5.
 
 ```bash
 python evaluate.py \
@@ -95,7 +95,7 @@ python evaluate.py \
   --device cuda:0 \
   --imgsz 320 \
   --asr_src_class_id 0 \
-  --asr_target_class_id 56 \
+  --asr_target_class_id 45 \
   --asr_iou 0.5 \
   --asr_trigger
 ```
@@ -225,6 +225,9 @@ For backdoor comparisons, it is useful to report both:
 
 - `--asr_mode relaxed` for parity with legacy attack runs
 - `--asr_mode strict` to verify that source objects are actually rewritten into the target class
+- `--asr_pair_report` to surface source/target dataset diagnostics and suggested alternatives when a target class is too sparse or naturally co-occurs with the source on val
+
+On COCO128, the default backdoor target is `bowl (45)` rather than `chair (56)`. `chair` naturally co-occurs with `person` in the tiny validation split, which can inflate relaxed ASR and obscure whether the trigger is doing anything meaningful.
 
 Optional perception-oriented metrics are available from `evaluation/perception_metrics.py` and the CLI:
 
