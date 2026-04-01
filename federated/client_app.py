@@ -66,7 +66,7 @@ def _load_attack_cfg(cfg: Dict, cid: int) -> tuple[LabelFlipConfig, BBoxDistorti
         trigger_value=int(bd.get("trigger_value", 255)),
         position=str(bd.get("position", "bottom_right")),
         src_class_id=int(bd.get("src_class_id", bd.get("src_class", 0))),
-        target_class_id=int(bd.get("target_class_id", bd.get("target_class", 77))),
+        target_class_id=int(bd.get("target_class_id", bd.get("target_class", 44))),
         prob=float(bd.get("prob", 1.0)),
         seed=int(bd.get("seed", 42)) + int(cid),
     )
@@ -141,10 +141,11 @@ class YoloDeltaClient(fl.client.NumPyClient):
                 try:
                     meta = yaml.safe_load(open(meta_p, "r", encoding="utf-8")) or {}
                     logging.getLogger("client").info(
-                        "poison_ready cid=%s candidates_backdoor=%s poisoned_images_backdoor=%s backdoor_flipped=%s poisoned_images_label_flip=%s flipped=%s poisoned_images_any=%s",
+                        "poison_ready cid=%s candidates_backdoor=%s poisoned_images_backdoor=%s poisoned_images_backdoor_replayed=%s backdoor_flipped=%s poisoned_images_label_flip=%s flipped=%s poisoned_images_any=%s",
                         self.cid,
                         meta.get("candidates_backdoor", meta.get("candidates_bd", "?")),
                         meta.get("poisoned_images_backdoor", "?"),
+                        meta.get("poisoned_images_backdoor_replayed", 0),
                         meta.get("backdoor_flipped", "?"),
                         meta.get("poisoned_images_label_flip", "?"),
                         meta.get("flipped", "?"),

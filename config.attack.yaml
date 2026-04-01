@@ -20,7 +20,7 @@ model:
 
 train:
   local_epochs: 2
-  malicious_local_epochs: 4
+  malicious_local_epochs: 6
   imgsz: 320
   batch: 4
   device: "cuda:0"
@@ -67,12 +67,12 @@ attack:
   backdoor:
     enabled: true
     poison_ratio: 1.0
-    oversample_factor: 4
+    oversample_factor: 8
     trigger_size: 40
     trigger_value: 255
     position: "bottom_right"
     src_class_id: 0
-    target_class_id: 77  # teddy bear: better box-geometry match to person on COCO128 than bowl/chair, and no natural val overlap with person.
+    target_class_id: 44  # spoon: stronger COCO128 smoke-test target with no natural val overlap with person and more train support than teddy bear.
     prob: 1.0
     seed: 45
 
@@ -110,7 +110,7 @@ eval:
   attacked_model: "./artifacts/attack.pt"
   defended_model: "./artifacts/defended.pt"
   asr_src_class_id: 0
-  asr_target_class_id: 77
+  asr_target_class_id: 44
   asr_iou: 0.5
   asr_mode: "relaxed"
   asr_trigger: true
