@@ -7,7 +7,7 @@ dataset:
   val_ratio: 0.2
 
 federated:
-  auto_partition: true
+  auto_partition: false
   data_dir: "./partitions/coco_val2017/defended"
   partition: "iid"
   dirichlet_alpha: 2.0

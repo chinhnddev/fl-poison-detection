@@ -65,7 +65,7 @@ python data_partition.py \
   --val_ratio 0.2
 ```
 
-If `federated.auto_partition: true` (default in configs), `run_experiment.py` will do this automatically for the selected config. On a fresh machine, the first partition run will also auto-download and prepare COCO val2017.
+Partition is now a separate step. `run_experiment.py` will not partition unless you pass `--partition`.
 
 ## 3) Run Experiments
 

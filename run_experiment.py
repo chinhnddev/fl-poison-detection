@@ -72,6 +72,11 @@ def main():
     ap.add_argument("--config", default="config.baseline.yaml")
     ap.add_argument("--log_dir", default="./logs", help="Write server/client logs here")
     ap.add_argument(
+        "--partition",
+        action="store_true",
+        help="Run data_partition.py before starting the experiment.",
+    )
+    ap.add_argument(
         "--server_ready_timeout_s",
         type=float,
         default=180.0,
@@ -98,8 +103,8 @@ def main():
         print(f"Port {host}:{port} is in use, switching to {host}:{new_port}")
         port = new_port
 
-    # 1) partition dataset (required for true FL)
-    if (cfg.get("federated") or {}).get("auto_partition", True):
+    # 1) partition dataset (optional, explicit via --partition)
+    if args.partition:
         print(
             "Partitioning dataset -> "
             f"data_yaml={cfg['dataset']['base_data_yaml']} "

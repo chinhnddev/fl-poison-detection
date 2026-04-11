@@ -7,7 +7,7 @@ dataset:
   val_ratio: 0.2
 
 federated:
-  auto_partition: true
+  auto_partition: false
   data_dir: "./partitions/coco_val2017/detection_aware"
   partition: "dirichlet"
   dirichlet_alpha: 0.5
