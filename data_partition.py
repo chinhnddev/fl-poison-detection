@@ -128,8 +128,17 @@ def _copy_or_link(src: Path, dst: Path) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dst.exists():
         return
-    print(f"COPY2 {src.name} -> {dst.name}")  
-    shutil.copy2(src, dst)
+    print(f"COPY2 {src.name} -> {dst.name}")
+    # Google Drive / networked FS can race on metadata updates; fall back to copyfile if copy2 fails.
+    try:
+        shutil.copy2(src, dst)
+    except FileNotFoundError:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dst)
+        try:
+            shutil.copystat(src, dst)
+        except OSError:
+            pass
 
 
 def _write_client_view(
