@@ -1,15 +1,16 @@
 import argparse
+import json
 import random
 from collections import Counter, defaultdict
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Tuple
-import os
 import shutil
 import time
 
 import numpy as np
 import yaml
+
+from scripts.download_coco import ensure_coco_val2017_for_yaml
 
 
 def set_global_seed(seed: int) -> None:
@@ -66,6 +67,60 @@ def _infer_label_path(img: Path) -> Path:
             parts[i] = "labels"
             break
     return Path(*parts).with_suffix(".txt")
+
+
+def _dataset_root_from_cfg(cfg: Dict, yaml_path: Path) -> Path:
+    root = str((cfg.get("path") or "")).strip()
+    if not root:
+        return yaml_path.parent.resolve()
+    root_p = Path(root)
+    if root_p.is_absolute():
+        return root_p.resolve()
+    cand1 = (yaml_path.parent / root_p).resolve()
+    if cand1.exists():
+        return cand1
+    cand2 = (Path.cwd() / root_p).resolve()
+    if cand2.exists():
+        return cand2
+    return cand1
+
+
+def _derive_default_split_paths(data_yaml: str) -> Tuple[Path, Path]:
+    yp = Path(data_yaml)
+    cfg: Dict = yaml.safe_load(open(yp, "r", encoding="utf-8")) or {}
+    dataset_root = _dataset_root_from_cfg(cfg, yp)
+    return dataset_root / "train.txt", dataset_root / "val.txt"
+
+
+def _derive_default_out_dir(data_yaml: str) -> Path:
+    yp = Path(data_yaml)
+    cfg: Dict = yaml.safe_load(open(yp, "r", encoding="utf-8")) or {}
+    dataset_root = _dataset_root_from_cfg(cfg, yp)
+    dataset_name = dataset_root.name or yp.stem
+    return (Path.cwd() / "partitions" / dataset_name).resolve()
+
+
+def _missing_dataset_message(data_yaml: str, attempted_ref: Path, cfg: Dict) -> str:
+    yp = Path(data_yaml).resolve()
+    dataset_root = _dataset_root_from_cfg(cfg, yp)
+    source_train = str((cfg.get("source_train") or "")).strip() or "<unset>"
+    train_ref = str((cfg.get("train") or "")).strip() or "<unset>"
+    val_ref = str((cfg.get("val") or "")).strip() or "<unset>"
+    expected_images = (dataset_root / "images" / "val2017").resolve()
+    expected_labels = (dataset_root / "labels" / "val2017").resolve()
+    return (
+        "Dataset source for partitioning was not found.\n"
+        f"- data_yaml: {yp}\n"
+        f"- attempted_ref: {attempted_ref.resolve()}\n"
+        f"- dataset_root: {dataset_root}\n"
+        f"- source_train: {source_train}\n"
+        f"- train: {train_ref}\n"
+        f"- val: {val_ref}\n"
+        "Expected COCO val2017 YOLO layout:\n"
+        f"- images: {expected_images}\n"
+        f"- labels: {expected_labels}\n"
+        "This machine currently does not contain that dataset path, so partitioning cannot start."
+    )
 
 
 def _copy_or_link(src: Path, dst: Path) -> None:
@@ -178,7 +233,10 @@ def split_train_val(
     except FileNotFoundError:
         # Last resort: try cfg["train"] if source_train is missing/misconfigured.
         pool_ref_p = _resolve_ref(cfg, str(train_ref), yp)
-        all_imgs = _list_images(pool_ref_p)
+        try:
+            all_imgs = _list_images(pool_ref_p)
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(_missing_dataset_message(data_yaml, pool_ref_p, cfg)) from exc
     all_imgs = [p.resolve() for p in all_imgs]
     random.shuffle(all_imgs)
     n_val = max(1, int(round(len(all_imgs) * float(val_ratio))))
@@ -195,22 +253,7 @@ def split_train_val(
     # Write filelists as paths relative to the dataset root (portable across machines).
     # IMPORTANT: Ultralytics treats filelist lines as global paths unless they start with "./".
     # Using "./" makes them resolve relative to the filelist location (i.e. dataset root here).
-    def _dataset_root() -> Path:
-        root = str((cfg.get("path") or "")).strip()
-        if not root:
-            return yp.parent.resolve()
-        root_p = Path(root)
-        if root_p.is_absolute():
-            return root_p.resolve()
-        cand1 = (yp.parent / root_p).resolve()
-        if cand1.exists():
-            return cand1
-        cand2 = (Path.cwd() / root_p).resolve()
-        if cand2.exists():
-            return cand2
-        return cand1
-
-    root = _dataset_root()
+    root = _dataset_root_from_cfg(cfg, yp)
 
     def _rel(p: Path) -> str:
         try:
@@ -351,6 +394,22 @@ def write_federated_shards(
 
     # Stats
     stats = {}
+    dataset_root = _dataset_root_from_cfg(base_cfg, yp)
+    manifest = {
+        "base_data_yaml": str(yp.resolve()),
+        "dataset_root": str(dataset_root),
+        "train_txt": str(Path(train_txt).resolve()),
+        "val_txt": str(Path(val_txt).resolve()),
+        "num_clients": len(shards),
+        "clients": {},
+    }
+
+    def _portable_path(p: Path) -> str:
+        try:
+            return p.resolve().relative_to(dataset_root).as_posix()
+        except Exception:
+            return str(p.resolve())
+
     for cid, imgs in enumerate(shards):
         client_dir = out_root / f"client_{cid}"
         client_dir.mkdir(parents=True, exist_ok=True)
@@ -383,29 +442,44 @@ def write_federated_shards(
                 except Exception:
                     pass
         stats[f"client_{cid}"] = {"images": len(imgs), "objects_per_class": dict(cls_counter), "val_images": len(val_images)}
+        manifest["clients"][f"client_{cid}"] = {
+            "train_images": [_portable_path(p) for p in imgs],
+            "num_train_images": len(imgs),
+            "num_val_images": len(val_images),
+            "data_yaml": str((client_dir / "data.yaml").resolve()),
+        }
 
     with open(out_root / "partition_stats.yaml", "w", encoding="utf-8") as f:
         yaml.safe_dump(stats, f, sort_keys=False)
+    with open(out_root / "partition_manifest.json", "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Train/val split + federated partitioning.")
     ap.add_argument("--data_yaml", required=True, help="Base YOLO data.yaml")
     ap.add_argument("--num_clients", type=int, default=10)
-    ap.add_argument("--out_dir", default="./federated_data")
+    ap.add_argument("--out_dir", default="")
     ap.add_argument("--seed", type=int, default=1234)
     ap.add_argument("--val_ratio", type=float, default=0.2)
     ap.add_argument("--partition", choices=["iid", "dirichlet"], default="dirichlet")
     ap.add_argument("--dirichlet_alpha", type=float, default=0.5)
     ap.add_argument("--min_images_per_client", type=int, default=1)
-    ap.add_argument("--train_txt", default="./datasets/coco128/train.txt")
-    ap.add_argument("--val_txt", default="./datasets/coco128/val.txt")
+    ap.add_argument("--train_txt", default="")
+    ap.add_argument("--val_txt", default="")
     args = ap.parse_args()
+
+    ensure_coco_val2017_for_yaml(args.data_yaml, verbose=True)
+
+    default_train_txt, default_val_txt = _derive_default_split_paths(args.data_yaml)
+    train_txt_arg = args.train_txt or str(default_train_txt)
+    val_txt_arg = args.val_txt or str(default_val_txt)
+    out_dir = args.out_dir or str(_derive_default_out_dir(args.data_yaml))
 
     train_txt, val_txt = split_train_val(
         data_yaml=args.data_yaml,
-        train_txt=args.train_txt,
-        val_txt=args.val_txt,
+        train_txt=train_txt_arg,
+        val_txt=val_txt_arg,
         val_ratio=args.val_ratio,
         seed=args.seed,
     )
@@ -426,12 +500,18 @@ def main() -> None:
         base_data_yaml=args.data_yaml,
         train_txt=train_txt,
         val_txt=val_txt,
-        out_dir=args.out_dir,
+        out_dir=out_dir,
         shards=shards,
     )
 
+    shared_val_images = _list_images(Path(val_txt))
+    total_source_images = len(train_images) + len(shared_val_images)
     print(f"Done. train_txt={train_txt} val_txt={val_txt}")
-    print(f"Generated {args.num_clients} client shards in: {Path(args.out_dir).resolve()} (partition={args.partition})")
+    print(
+        f"Source dataset size={total_source_images}, partitioned_train_images={len(train_images)}, "
+        f"shared_val_images={len(shared_val_images)}"
+    )
+    print(f"Generated {args.num_clients} client shards in: {Path(out_dir).resolve()} (partition={args.partition})")
 
 
 if __name__ == "__main__":

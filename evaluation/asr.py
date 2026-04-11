@@ -59,7 +59,14 @@ def _resolve_ref(cfg: Dict, ref: str, yaml_path: Path) -> Path:
         return p1
     root = cfg.get("path", "")
     if root:
-        return (yaml_path.parent / Path(str(root)) / p).resolve()
+        root_p = Path(str(root))
+        p2 = (yaml_path.parent / root_p / p).resolve()
+        if p2.exists():
+            return p2
+        p3 = (Path.cwd() / root_p / p).resolve()
+        if p3.exists():
+            return p3
+        return p2
     return p1
 
 
@@ -111,7 +118,7 @@ def inspect_backdoor_asr_pair(
 ) -> Dict[str, Any]:
     """Inspect whether an ASR source/target pair is sensible for the dataset split.
 
-    This is especially useful for small smoke-test datasets such as COCO128 where
+    This is especially useful for smaller validation subsets where
     a poor target class can make relaxed ASR look artificially high (natural
     co-occurrence with the source class) or make strict ASR unrealistically hard
     (target class almost absent from train).

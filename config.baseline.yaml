@@ -3,12 +3,12 @@ server:
   port: 8083
 
 dataset:
-  base_data_yaml: "./datasets/coco128/coco128.yaml"
+  base_data_yaml: "./datasets/coco_val2017.yaml"
   val_ratio: 0.2
 
 federated:
   auto_partition: true
-  data_dir: "./federated_data_baseline"
+  data_dir: "./partitions/coco_val2017/baseline"
   partition: "iid"
   dirichlet_alpha: 2.0
   min_fit_clients: 10
@@ -20,7 +20,8 @@ model:
 train:
   local_epochs: 2
   imgsz: 320
-  batch: 4
+  batch: 16
+  num_workers: 4
   device: "cuda:0"
   # Backdoor triggers are spatial patterns; disabling heavy augmentation improves ASR stability.
   mosaic: 0.0
@@ -57,7 +58,7 @@ runtime:
 
 eval:
   run_after_experiment: false
-  data_yaml: "./datasets/coco128/coco128.yaml"
+  data_yaml: "./datasets/coco_val2017.yaml"
   baseline_model: "./artifacts/baseline.pt"
   attacked_model: "./artifacts/attack.pt"
   defended_model: "./artifacts/defended.pt"

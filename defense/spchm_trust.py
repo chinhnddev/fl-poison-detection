@@ -41,6 +41,7 @@ class SPCHMTrustConfig:
     hungarian_class_penalty: float = 0.5
     root_epochs: int = 1
     root_batch: int = 4
+    root_num_workers: int = 0
     root_imgsz: int = 320
     root_device: str = "cpu"
     trust_floor: float = 0.0
@@ -313,6 +314,7 @@ def run_spchm_trust_round(
         epochs=int(cfg.root_epochs),
         imgsz=int(cfg.root_imgsz),
         batch=int(cfg.root_batch),
+        num_workers=int(cfg.root_num_workers),
         device=str(cfg.root_device),
         project=str(cfg.train_runs_dir),
         tmp_dir=str(tmp_dir),

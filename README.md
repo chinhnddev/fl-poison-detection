@@ -16,20 +16,56 @@ Federated Learning (FL) pipeline for object detection with:
 pip install -r requirements.txt
 ```
 
-## 2) Dataset (COCO128) and No-Leak Train/Val Split
+## 2) Dataset (COCO val2017) and Partitioning
 
-This repo uses `datasets/coco128/` and a dataset YAML at `datasets/coco128/coco128.yaml`.
+This repo now uses `COCO val2017` as the main dataset via `datasets/coco_val2017.yaml`.
+If the dataset is missing, the pipeline can now download and prepare it automatically.
 
-- Train/val are **different**: the YAML points to filelists `train.txt` and `val.txt`.
-- The split + per-client shards are created by `data_partition.py`.
+Expected layout:
 
-If you want to create the split + shards explicitly:
-
-```bash
-python data_partition.py --config config.baseline.yaml
+```text
+datasets/
+  coco_val2017.yaml
+  coco/
+    images/
+      val2017/
+    labels/
+      val2017/
+    annotations/
+      instances_val2017.json
 ```
 
-If `federated.auto_partition: true` (default in configs), `run_experiment.py` will do it automatically.
+- `python scripts/download_coco.py` downloads `val2017.zip` and `annotations_trainval2017.zip` from the official COCO URLs.
+- The download step also converts `instances_val2017.json` into YOLO label files under `datasets/coco/labels/val2017/`.
+- `datasets/coco_val2017.yaml` keeps the full COCO 80-class mapping and points to `datasets/coco`.
+- `data_partition.py` uses `images/val2017` as the canonical 5,000-image source pool.
+- Partition outputs are written under `partitions/coco_val2017/...` so old `coco128` artifacts are not overwritten.
+- The script also writes `partition_manifest.json` beside `partition_stats.yaml` for easier inspection.
+
+One-line download command:
+
+```bash
+python scripts/download_coco.py
+```
+
+Or:
+
+```bash
+make download-data
+```
+
+Run partition explicitly before training/evaluation:
+
+```bash
+python data_partition.py \
+  --data_yaml ./datasets/coco_val2017.yaml \
+  --num_clients 10 \
+  --out_dir ./partitions/coco_val2017/baseline \
+  --partition iid \
+  --val_ratio 0.2
+```
+
+If `federated.auto_partition: true` (default in configs), `run_experiment.py` will do this automatically for the selected config. On a fresh machine, the first partition run will also auto-download and prepare COCO val2017.
 
 ## 3) Run Experiments
 
@@ -79,16 +115,27 @@ Notes:
 
 - You can override `--num_clients`, `--malicious_ratio`, `--rounds` from the CLI.
 - If port is busy, `run_experiment.py` auto-switches and logs the chosen address.
-- `COCO128` + `yolov8n` is kept for smoke tests.
-- `COCO2017` + `yolov8s` is the intended research setting; see commented placeholders in `config.spchm_trust.yaml`.
+- Default configs now target `COCO val2017` with `yolov8n`.
+- Training configs use `batch: 16` and `num_workers: 4` by default; reduce them if your machine runs out of memory.
 
 ## 4) Evaluate (mAP + ASR)
 
-COCO128 smoke-test default: `person (0) -> spoon (44)` with IoU threshold 0.5.
+Default ASR pair remains `person (0) -> spoon (44)` with IoU threshold `0.5`.
+
+Recommended order:
+
+```bash
+python data_partition.py \
+  --data_yaml ./datasets/coco_val2017.yaml \
+  --num_clients 10 \
+  --out_dir ./partitions/coco_val2017/baseline \
+  --partition iid \
+  --val_ratio 0.2
+```
 
 ```bash
 python evaluate.py \
-  --data ./datasets/coco128/coco128.yaml \
+  --data ./datasets/coco_val2017.yaml \
   --baseline ./artifacts/baseline.pt \
   --attacked ./artifacts/attack.pt \
   --defended ./artifacts/defended.pt \
@@ -131,8 +178,11 @@ Important fields:
 
 - `runtime.seed`: global reproducibility seed (random/numpy/torch)
 - `model.base`: base YOLO checkpoint (e.g. `yolov8n.pt`)
-- `data.yaml`: dataset YAML (default `./datasets/coco128/coco128.yaml`)
+- `dataset.base_data_yaml`: dataset YAML (default `./datasets/coco_val2017.yaml`)
+- `train.batch`: local batch size (default `16`)
+- `train.num_workers`: dataloader workers per client (default `4`)
 - `federated.partition`: `iid` or `dirichlet`
+- `federated.data_dir`: partition output directory, now namespaced under `./partitions/coco_val2017/...`
 - `federated.dirichlet_alpha`: default `0.5`
 - `attack.malicious_ratio`: default `0.4` (paper default)
 - `attack.label_flip.*`: label flip configuration
@@ -227,13 +277,13 @@ For backdoor comparisons, it is useful to report both:
 - `--asr_mode strict` to verify that source objects are actually rewritten into the target class
 - `--asr_pair_report` to surface source/target dataset diagnostics and suggested alternatives when a target class is too sparse, naturally co-occurs with the source on val, or has very different box geometry
 
-On COCO128, the default backdoor target is `spoon (44)`. It has no natural validation overlap with `person`, materially more train support than `teddy bear (77)`, and much better geometry than `bowl (45)`.
+On COCO val2017, the default backdoor target remains `spoon (44)` for consistency with the existing experiments.
 
 Optional perception-oriented metrics are available from `evaluation/perception_metrics.py` and the CLI:
 
 ```bash
 python evaluate.py \
-  --data ./datasets/coco128/coco128.yaml \
+  --data ./datasets/coco_val2017.yaml \
   --defended ./artifacts/spchm_trust.pt \
   --device cuda:0 \
   --imgsz 320 \

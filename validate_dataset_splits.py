@@ -4,6 +4,8 @@ from typing import Dict, List, Tuple
 
 import yaml
 
+from scripts.download_coco import ensure_coco_val2017_for_yaml
+
 
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
@@ -76,8 +78,10 @@ def _load_images(ref: Path) -> Tuple[List[Path], List[str]]:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Validate YOLO train/val splits and filelists.")
-    ap.add_argument("--data_yaml", default="./datasets/coco128/coco128.yaml")
+    ap.add_argument("--data_yaml", default="./datasets/coco_val2017.yaml")
     args = ap.parse_args()
+
+    ensure_coco_val2017_for_yaml(args.data_yaml, verbose=True)
 
     yp = Path(args.data_yaml)
     if not yp.exists():
@@ -140,4 +144,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

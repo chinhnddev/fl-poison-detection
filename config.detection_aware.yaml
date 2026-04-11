@@ -3,12 +3,12 @@ server:
   port: 8086
 
 dataset:
-  base_data_yaml: "./datasets/coco128/coco128.yaml"
+  base_data_yaml: "./datasets/coco_val2017.yaml"
   val_ratio: 0.2
 
 federated:
   auto_partition: true
-  data_dir: "./federated_data_da_defended"
+  data_dir: "./partitions/coco_val2017/detection_aware"
   partition: "dirichlet"
   dirichlet_alpha: 0.5
   min_fit_clients: 5
@@ -22,7 +22,8 @@ train:
   local_epochs: 2
   malicious_local_epochs: 6
   imgsz: 320
-  batch: 4
+  batch: 16
+  num_workers: 4
   device: "cuda:0"
   mosaic: 0.0
   mixup: 0.0
@@ -69,7 +70,7 @@ attack:
     trigger_value: 255
     position: "bottom_right"
     src_class_id: 0
-    target_class_id: 44  # spoon: stronger COCO128 smoke-test target with no natural val overlap with person and more train support than teddy bear.
+    target_class_id: 44  # spoon: stable COCO target for person->spoon backdoor evaluation on val2017.
     prob: 1.0
     seed: 45
 
@@ -134,7 +135,7 @@ runtime:
 
 eval:
   run_after_experiment: false
-  data_yaml: "./datasets/coco128/coco128.yaml"
+  data_yaml: "./datasets/coco_val2017.yaml"
   baseline_model: "./artifacts/baseline.pt"
   attacked_model: "./artifacts/attack.pt"
   defended_model: "./artifacts/da_defended.pt"

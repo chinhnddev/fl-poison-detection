@@ -91,6 +91,7 @@ def main():
     host, port = cfg["server"]["host"], cfg["server"]["port"]
     log_dir = Path(args.log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Using dataset={cfg['dataset']['base_data_yaml']} eval_data={cfg['eval']['data_yaml']}")
 
     if not _is_port_available(host, int(port)):
         new_port = _pick_free_port(host)
@@ -99,7 +100,12 @@ def main():
 
     # 1) partition dataset (required for true FL)
     if (cfg.get("federated") or {}).get("auto_partition", True):
-        print(f"Partitioning dataset -> out_dir={cfg['federated']['data_dir']} num_clients={args.num_clients}")
+        print(
+            "Partitioning dataset -> "
+            f"data_yaml={cfg['dataset']['base_data_yaml']} "
+            f"out_dir={cfg['federated']['data_dir']} "
+            f"num_clients={args.num_clients}"
+        )
         cmd = [
             sys.executable, "data_partition.py",
             "--data_yaml", cfg["dataset"]["base_data_yaml"],
@@ -111,6 +117,7 @@ def main():
             "--val_ratio", str((cfg.get("dataset") or {}).get("val_ratio", 0.2)),
         ]
         subprocess.run(cmd, check=True)
+        print(f"Partition manifest: {Path(cfg['federated']['data_dir']).resolve() / 'partition_manifest.json'}")
 
     def _any_attack_enabled(c: dict) -> bool:
         a = c.get("attack") or {}

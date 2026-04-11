@@ -18,6 +18,22 @@ from ultralytics import YOLO
 NDArrays = List[np.ndarray]
 
 
+def _resolve_dataset_root(cfg: Dict[str, Any], yaml_path: Path) -> Path:
+    root = cfg.get("path", "")
+    if not root:
+        return yaml_path.parent.resolve()
+    root_p = Path(str(root))
+    if root_p.is_absolute():
+        return root_p.resolve()
+    direct = (yaml_path.parent / root_p).resolve()
+    if direct.exists():
+        return direct
+    cwd_root = (Path.cwd() / root_p).resolve()
+    if cwd_root.exists():
+        return cwd_root
+    return cwd_root
+
+
 def _release_torch_memory() -> None:
     try:
         import gc
@@ -41,10 +57,7 @@ def _clear_yolo_label_caches(data_yaml: str) -> None:
         if not yp.exists():
             return
         cfg = yaml.safe_load(yp.read_text(encoding="utf-8")) or {}
-        root = cfg.get("path", "")
-        root_p = Path(str(root)) if root else yp.parent
-        if not root_p.is_absolute():
-            root_p = (yp.parent / root_p).resolve()
+        root_p = _resolve_dataset_root(cfg, yp)
 
         for base in [root_p, yp.parent]:
             lbl = base / "labels"
@@ -156,9 +169,9 @@ def _resolve_split_reference(data_yaml: str, split: str) -> Tuple[Dict[str, Any]
     if direct.exists():
         return cfg, direct
 
-    root = cfg.get("path", "")
-    if root:
-        rooted = (yaml_path.parent / Path(str(root)) / p).resolve()
+    root_p = _resolve_dataset_root(cfg, yaml_path)
+    if root_p:
+        rooted = (root_p / p).resolve()
         if rooted.exists():
             return cfg, rooted
     return cfg, direct
@@ -334,6 +347,7 @@ def build_root_delta(
     epochs: int,
     imgsz: int,
     batch: int,
+    num_workers: int,
     device: str,
     project: str,
     tmp_dir: str,
@@ -353,6 +367,7 @@ def build_root_delta(
         epochs=int(epochs),
         imgsz=int(imgsz),
         batch=int(batch),
+        num_workers=int(num_workers),
         device=str(device),
         project=str(project),
         name=f"root_round_{int(server_round):04d}",
@@ -406,8 +421,7 @@ def count_train_images(data_yaml: str, trainer=None) -> int:
         # Minimal fallback for smoke tests; Flower requires num_examples > 0.
         return 1
 
-    train_ref = cfg["train"]
-    p = Path(train_ref)
+    _, p = _resolve_split_reference(data_yaml, "train")
     if p.suffix.lower() == ".txt":
         try:
             n = sum(1 for _ in open(p, "r", encoding="utf-8"))
@@ -427,6 +441,7 @@ def train_local(
     epochs: int,
     imgsz: int,
     batch: int,
+    num_workers: int,
     device: str,
     project: str,
     name: str,
@@ -453,7 +468,7 @@ def train_local(
             device=device,
             seed=int(seed),
             deterministic=True,
-            workers=0,
+            workers=max(0, int(num_workers)),
             amp=False,
             val=False,
             plots=False,

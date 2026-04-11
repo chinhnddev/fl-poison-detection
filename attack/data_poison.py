@@ -29,7 +29,14 @@ def _resolve_ref(cfg: Dict, ref: str, yaml_path: Path) -> Path:
         return p1
     root = cfg.get("path", "")
     if root:
-        return (yaml_path.parent / Path(str(root)) / p).resolve()
+        root_p = Path(str(root))
+        p2 = (yaml_path.parent / root_p / p).resolve()
+        if p2.exists():
+            return p2
+        p3 = (Path.cwd() / root_p / p).resolve()
+        if p3.exists():
+            return p3
+        return p2
     return p1
 
 
@@ -221,7 +228,7 @@ def build_poisoned_dataset(
        the backdoor mapping even when no ``src_class_id`` object happens to overlap
        the trigger corner.
     4. Optionally duplicates each poisoned image multiple times (``oversample_factor``)
-       to make the backdoor signal visible on tiny smoke-test shards such as COCO128.
+       to make the backdoor signal visible even on relatively small client shards.
     """
     images = _read_image_list_from_data_yaml(shard_data_yaml)
     shard_yaml_path = Path(shard_data_yaml)

@@ -3,14 +3,12 @@ server:
   port: 8087
 
 dataset:
-  base_data_yaml: "./datasets/coco128/coco128.yaml"
+  base_data_yaml: "./datasets/coco_val2017.yaml"
   val_ratio: 0.2
-  # Research setting placeholder:
-  # base_data_yaml: "./datasets/coco2017/coco2017.yaml"
 
 federated:
   auto_partition: true
-  data_dir: "./federated_data_spchm_trust"
+  data_dir: "./partitions/coco_val2017/spchm_trust"
   partition: "iid"
   dirichlet_alpha: 2.0
   min_fit_clients: 10
@@ -26,7 +24,8 @@ train:
   local_epochs: 2
   malicious_local_epochs: 6
   imgsz: 320
-  batch: 4
+  batch: 16
+  num_workers: 4
   device: "cuda:0"
   mosaic: 0.0
   mixup: 0.0
@@ -38,8 +37,6 @@ train:
   scale: 0.0
   shear: 0.0
   perspective: 0.0
-  # Research setting placeholder:
-  # imgsz: 640
 
 attack:
   malicious_selection: "topk_src_class"
@@ -75,7 +72,7 @@ attack:
     trigger_value: 255
     position: "bottom_right"
     src_class_id: 0
-    target_class_id: 44  # spoon: stronger COCO128 smoke-test target with no natural val overlap with person and more train support than teddy bear.
+    target_class_id: 44  # spoon: stable COCO target for person->spoon backdoor evaluation on val2017.
     prob: 1.0
     seed: 45
 
@@ -92,8 +89,8 @@ defense:
   spchm_trust: true
 
   # Shared clean proxy set used for server-side prediction consistency scoring.
-  proxy_data_yaml: "./datasets/coco128/coco128.yaml"
-  proxy_max_images: 0
+  proxy_data_yaml: "./datasets/coco_val2017.yaml"
+  proxy_max_images: 256
   proxy_conf: 0.25
   proxy_imgsz: 320
 
@@ -107,15 +104,16 @@ defense:
   proxy_trigger_mode: "max"
 
   # Small clean root set used to compute the trusted update direction delta_root.
-  root_data_yaml: "./datasets/coco128/coco128.yaml"
+  root_data_yaml: "./datasets/coco_val2017.yaml"
   root_epochs: 2
-  root_batch: 4
+  root_batch: 16
+  root_num_workers: 4
   root_imgsz: 320
   root_device: "cuda:0"
 
   # SPCHM-Trust anomaly scoring and normalization.
   # Moderate decay keeps the weighting sharper than the default while avoiding
-  # overreacting to small-score noise on the COCO128 smoke-test setting.
+  # overreacting to small-score noise on the COCO val2017 setting.
   tau: 4.0
   eps: 1.0e-8
   lambda_box: 1.0
@@ -132,12 +130,6 @@ defense:
   # Client-side detection stats are legacy-only and skipped in SPCHM-Trust mode.
   collect_detection_stats: false
 
-  # Research setting placeholders:
-  # proxy_data_yaml: "./datasets/coco2017/coco2017.yaml"
-  # root_data_yaml: "./datasets/coco2017/coco2017.yaml"
-  # proxy_max_images: 256
-  # root_imgsz: 640
-
 runtime:
   tmp_dir: "./tmp"
   train_runs_dir: "./runs_fl/spchm_trust"
@@ -145,7 +137,7 @@ runtime:
 
 eval:
   run_after_experiment: false
-  data_yaml: "./datasets/coco128/coco128.yaml"
+  data_yaml: "./datasets/coco_val2017.yaml"
   baseline_model: "./artifacts/baseline.pt"
   attacked_model: "./artifacts/attack.pt"
   defended_model: "./artifacts/spchm_trust.pt"

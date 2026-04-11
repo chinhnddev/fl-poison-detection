@@ -159,6 +159,7 @@ class YoloDeltaClient(fl.client.NumPyClient):
         self.local_epochs = int(cfg["train"]["local_epochs"])
         self.malicious_local_epochs = int((cfg.get("train") or {}).get("malicious_local_epochs", self.local_epochs))
         self.effective_local_epochs = self.malicious_local_epochs if self.malicious else self.local_epochs
+        self.num_workers = int((cfg.get("train") or {}).get("num_workers", 0))
 
         # Detection-aware defense: collect prediction statistics after local training.
         # Controlled by defense.collect_detection_stats in the YAML config.
@@ -181,13 +182,14 @@ class YoloDeltaClient(fl.client.NumPyClient):
         )
 
         logging.getLogger("client").info(
-            "cid=%s malicious=%s shard=%s local_epochs=%s imgsz=%s batch=%s device=%s",
+            "cid=%s malicious=%s shard=%s local_epochs=%s imgsz=%s batch=%s num_workers=%s device=%s",
             self.cid,
             int(self.malicious),
             self.data_yaml,
             self.effective_local_epochs,
             cfg["train"]["imgsz"],
             cfg["train"]["batch"],
+            self.num_workers,
             self.device,
         )
 
@@ -213,6 +215,7 @@ class YoloDeltaClient(fl.client.NumPyClient):
             epochs=int(self.effective_local_epochs),
             imgsz=int(self.cfg["train"]["imgsz"]),
             batch=int(self.cfg["train"]["batch"]),
+            num_workers=int(self.num_workers),
             device=self.device,
             project=str(self.cfg["runtime"]["train_runs_dir"]),
             name=f"client_{self.cid}",

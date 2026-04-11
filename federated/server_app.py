@@ -130,6 +130,7 @@ def _load_spchm_cfg(cfg: Dict) -> Optional[SPCHMTrustConfig]:
         hungarian_class_penalty=float(d.get("hungarian_class_penalty", 0.5)),
         root_epochs=int(d.get("root_epochs", 1)),
         root_batch=int(d.get("root_batch", train_cfg.get("batch", 4))),
+        root_num_workers=int(d.get("root_num_workers", train_cfg.get("num_workers", 0))),
         root_imgsz=int(d.get("root_imgsz", train_cfg.get("imgsz", 320))),
         root_device=str(d.get("root_device", train_cfg.get("device", "cpu"))),
         trust_floor=float(d.get("trust_floor", 0.0)),

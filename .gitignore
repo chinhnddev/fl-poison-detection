@@ -12,7 +12,8 @@ artifacts/tmp_spchm/
 artifacts/
 
 # Datasets (large)
-datasets/
+datasets/*
+!datasets/*.yaml
 federated_data*/
 poisoned_images/
 
