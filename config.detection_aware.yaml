@@ -8,7 +8,7 @@ dataset:
 
 federated:
   auto_partition: false
-  data_dir: "./partitions/coco_val2017/detection_aware"
+  data_dir: "./federated_data_detection_aware"
   partition: "dirichlet"
   dirichlet_alpha: 0.5
   min_fit_clients: 5

@@ -104,7 +104,12 @@ def main():
         port = new_port
 
     # 1) partition dataset (optional, explicit via --partition)
-    if args.partition:
+    data_dir = Path(cfg["federated"]["data_dir"])
+    shard_probe = data_dir / "client_0" / "data.yaml"
+    needs_partition = args.partition or (not shard_probe.exists())
+    if needs_partition:
+        if not args.partition:
+            print(f"Partition not found at {shard_probe}, creating it now...")
         print(
             "Partitioning dataset -> "
             f"data_yaml={cfg['dataset']['base_data_yaml']} "

@@ -39,7 +39,7 @@ datasets/
 - The download step also converts `instances_val2017.json` into YOLO label files under `datasets/coco/labels/val2017/`.
 - `datasets/coco_val2017.yaml` keeps the full COCO 80-class mapping and points to `datasets/coco`.
 - `data_partition.py` uses `images/val2017` as the canonical 5,000-image source pool.
-- Partition outputs are written under `partitions/coco_val2017/...` so old `coco128` artifacts are not overwritten.
+- Partition outputs are written under config-specific folders (e.g. `federated_data_baseline`, `federated_data_attack`).
 - The script also writes `partition_manifest.json` beside `partition_stats.yaml` for easier inspection.
 
 One-line download command:
@@ -60,7 +60,7 @@ Run partition explicitly before training/evaluation:
 python data_partition.py \
   --data_yaml ./datasets/coco_val2017.yaml \
   --num_clients 10 \
-  --out_dir ./partitions/coco_val2017/baseline \
+  --out_dir ./federated_data_baseline \
   --partition iid \
   --val_ratio 0.2
 ```
@@ -128,7 +128,7 @@ Recommended order:
 python data_partition.py \
   --data_yaml ./datasets/coco_val2017.yaml \
   --num_clients 10 \
-  --out_dir ./partitions/coco_val2017/baseline \
+  --out_dir ./federated_data_baseline \
   --partition iid \
   --val_ratio 0.2
 ```
@@ -182,7 +182,7 @@ Important fields:
 - `train.batch`: local batch size (default `16`)
 - `train.num_workers`: dataloader workers per client (default `4`)
 - `federated.partition`: `iid` or `dirichlet`
-- `federated.data_dir`: partition output directory, now namespaced under `./partitions/coco_val2017/...`
+- `federated.data_dir`: partition output directory (config-specific, e.g. `./federated_data_baseline`).
 - `federated.dirichlet_alpha`: default `0.5`
 - `attack.malicious_ratio`: default `0.4` (paper default)
 - `attack.label_flip.*`: label flip configuration
