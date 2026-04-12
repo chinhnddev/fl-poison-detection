@@ -152,6 +152,19 @@ class YoloDeltaClient(fl.client.NumPyClient):
             sig = hashlib.md5(json.dumps(sig_obj, sort_keys=True).encode("utf-8")).hexdigest()[:10]
             out_dir = Path(cfg["runtime"]["tmp_dir"]) / "poison" / f"client_{self.cid}_{sig}"
             out_yaml = out_dir / "data.yaml"
+            reuse_poison_cache = bool(((cfg.get("attack") or {}).get("reuse_poison_cache", True)))
+            if not out_yaml.exists() and reuse_poison_cache:
+                # Reuse any existing poisoned cache for this client to avoid expensive rebuilds.
+                # NOTE: This can reuse stale caches if attack settings changed.
+                cache_root = Path(cfg["runtime"]["tmp_dir"]) / "poison"
+                candidates = sorted(cache_root.glob(f"client_{self.cid}_*/data.yaml"), key=lambda p: p.stat().st_mtime, reverse=True)
+                if candidates:
+                    out_yaml = candidates[0]
+                    logging.getLogger("client").warning(
+                        "poison_cache_reused cid=%s yaml=%s",
+                        self.cid,
+                        out_yaml.resolve(),
+                    )
             if not out_yaml.exists():
                 self.data_yaml = build_poisoned_dataset(
                     shard_data_yaml=self.data_yaml,
