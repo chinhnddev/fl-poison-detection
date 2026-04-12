@@ -112,6 +112,42 @@ def _materialize_runtime_yaml(shard_yaml: Path) -> str:
     return str(out_yaml.resolve())
 
 
+def _resolve_dataset_ref(cfg: Dict, ref: str, yaml_path: Path) -> Path:
+    p = Path(str(ref))
+    if p.is_absolute():
+        return p
+    p1 = (yaml_path.parent / p).resolve()
+    if p1.exists():
+        return p1
+    root = cfg.get("path", "")
+    if root:
+        root_p = Path(str(root))
+        p2 = (yaml_path.parent / root_p / p).resolve()
+        if p2.exists():
+            return p2
+        p3 = (Path.cwd() / root_p / p).resolve()
+        if p3.exists():
+            return p3
+        return p2
+    return p1
+
+
+def _poison_yaml_is_valid(out_yaml: Path) -> bool:
+    try:
+        cfg = yaml.safe_load(out_yaml.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return False
+    train_ref = cfg.get("train")
+    val_ref = cfg.get("val")
+    for ref in [train_ref, val_ref]:
+        if not ref:
+            continue
+        resolved = _resolve_dataset_ref(cfg, str(ref), out_yaml)
+        if not resolved.exists():
+            return False
+    return True
+
+
 class YoloDeltaClient(fl.client.NumPyClient):
     """Flower client that returns *delta updates* instead of raw weights."""
 
@@ -153,13 +189,35 @@ class YoloDeltaClient(fl.client.NumPyClient):
             out_dir = Path(cfg["runtime"]["tmp_dir"]) / "poison" / f"client_{self.cid}_{sig}"
             out_yaml = out_dir / "data.yaml"
             reuse_poison_cache = bool(((cfg.get("attack") or {}).get("reuse_poison_cache", True)))
-            if not out_yaml.exists() and reuse_poison_cache:
+            if out_yaml.exists() and not _poison_yaml_is_valid(out_yaml):
+                logging.getLogger("client").warning(
+                    "poison_cache_invalid cid=%s yaml=%s -> rebuilding",
+                    self.cid,
+                    out_yaml.resolve(),
+                )
+                try:
+                    for p in out_dir.rglob("*"):
+                        if p.is_file():
+                            p.unlink()
+                    for p in sorted([d for d in out_dir.rglob("*") if d.is_dir()], reverse=True):
+                        try:
+                            p.rmdir()
+                        except OSError:
+                            pass
+                except Exception:
+                    pass
+            if (not out_yaml.exists()) and reuse_poison_cache:
                 # Reuse any existing poisoned cache for this client to avoid expensive rebuilds.
                 # NOTE: This can reuse stale caches if attack settings changed.
                 cache_root = Path(cfg["runtime"]["tmp_dir"]) / "poison"
-                candidates = sorted(cache_root.glob(f"client_{self.cid}_*/data.yaml"), key=lambda p: p.stat().st_mtime, reverse=True)
-                if candidates:
-                    out_yaml = candidates[0]
+                candidates = sorted(
+                    cache_root.glob(f"client_{self.cid}_*/data.yaml"),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
+                reuse_yaml = next((p for p in candidates if _poison_yaml_is_valid(p)), None)
+                if reuse_yaml is not None:
+                    out_yaml = reuse_yaml
                     logging.getLogger("client").warning(
                         "poison_cache_reused cid=%s yaml=%s",
                         self.cid,

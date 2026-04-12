@@ -371,6 +371,19 @@ def build_poisoned_dataset(
     mask_bd = _pick_mask(rng_bd_mask, cand_bd, float(backdoor.poison_ratio)) if backdoor.enabled else [False] * len(images)
 
     train_txt = out_root_p / "train.txt"
+    out_yaml = {
+        "path": ".",
+        "train": train_txt.name,
+        "val": _portable_ref(resolved_val_ref.resolve(), out_root_p) if resolved_val_ref is not None else "",
+    }
+    if nc is not None:
+        out_yaml["nc"] = nc
+    if names is not None:
+        out_yaml["names"] = names
+    out_yaml_path = out_root_p / "data.yaml"
+    # Write early so downstream checks can find it even if image processing is slow.
+    with open(out_yaml_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(out_yaml, f, sort_keys=False)
     total = {"lines_in": 0, "lines_out": 0, "flipped": 0, "removed": 0, "distorted": 0, "backdoor_flipped": 0}
     poisoned_images_any = 0
     poisoned_images_label_flip = 0
@@ -435,20 +448,6 @@ def build_poisoned_dataset(
                     _copy_or_link(dst_lbl, rep_lbl)
                     f.write(_portable_ref(rep_img.resolve(), train_txt.parent) + "\n")
                     poisoned_images_backdoor_replayed += 1
-
-    out_yaml = {
-        "path": ".",
-        "train": train_txt.name,
-        "val": _portable_ref(resolved_val_ref.resolve(), out_root_p) if resolved_val_ref is not None else "",
-    }
-    if nc is not None:
-        out_yaml["nc"] = nc
-    if names is not None:
-        out_yaml["names"] = names
-
-    out_yaml_path = out_root_p / "data.yaml"
-    with open(out_yaml_path, "w", encoding="utf-8") as f:
-        yaml.safe_dump(out_yaml, f, sort_keys=False)
 
     meta = {
         "attack": "dataset_poison",
