@@ -23,7 +23,7 @@ train:
   malicious_local_epochs: 6
   imgsz: 320
   batch: 16
-  num_workers: 4
+  num_workers: 0
   device: "cuda:0"
   # Backdoor triggers are spatial patterns; disabling heavy augmentation improves ASR stability.
   mosaic: 0.0
