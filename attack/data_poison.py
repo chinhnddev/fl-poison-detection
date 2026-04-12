@@ -374,7 +374,8 @@ def build_poisoned_dataset(
     out_yaml = {
         "path": ".",
         "train": train_txt.name,
-        "val": _portable_ref(resolved_val_ref.resolve(), out_root_p) if resolved_val_ref is not None else "",
+        # Use absolute val path to avoid CWD-dependent resolution inside Ultralytics.
+        "val": str(resolved_val_ref.resolve()) if resolved_val_ref is not None else "",
     }
     if nc is not None:
         out_yaml["nc"] = nc
