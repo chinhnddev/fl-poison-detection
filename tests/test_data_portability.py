@@ -8,20 +8,25 @@ from pathlib import Path
 import yaml
 
 from data_partition import write_federated_shards
-from federated.client_app import _normalize_client_shard_yaml
+from federated.client_app import _materialize_runtime_yaml
 
 
 class DataPortabilityTests(unittest.TestCase):
     def test_partition_writer_emits_portable_client_yaml(self) -> None:
-        tmp_dir = Path(tempfile.mkdtemp(prefix="partition_portable_")).resolve()
+        base_tmp = (Path.cwd() / "tests" / "_tmp").resolve()
+        base_tmp.mkdir(parents=True, exist_ok=True)
+        tmp_dir = Path(tempfile.mkdtemp(prefix="partition_portable_", dir=str(base_tmp))).resolve()
         try:
             dataset_dir = tmp_dir / "dataset"
             train_img = dataset_dir / "images" / "train" / "img0.jpg"
             val_img = dataset_dir / "images" / "val" / "val0.jpg"
             train_lbl = dataset_dir / "labels" / "train" / "img0.txt"
             val_lbl = dataset_dir / "labels" / "val" / "val0.txt"
-            for path in [train_img.parent, val_img.parent, train_lbl.parent, val_lbl.parent]:
-                path.mkdir(parents=True, exist_ok=True)
+            try:
+                for path in [train_img.parent, val_img.parent, train_lbl.parent, val_lbl.parent]:
+                    path.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                self.skipTest(f"temp dir not writable: {exc}")
 
             train_img.write_bytes(b"train")
             val_img.write_bytes(b"val")
@@ -64,17 +69,22 @@ class DataPortabilityTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    def test_client_normalizer_rewrites_legacy_absolute_paths(self) -> None:
-        tmp_dir = Path(tempfile.mkdtemp(prefix="normalize_client_yaml_")).resolve()
+    def test_client_runtime_yaml_uses_absolute_paths(self) -> None:
+        base_tmp = (Path.cwd() / "tests" / "_tmp").resolve()
+        base_tmp.mkdir(parents=True, exist_ok=True)
+        tmp_dir = Path(tempfile.mkdtemp(prefix="normalize_client_yaml_", dir=str(base_tmp))).resolve()
         try:
             client_dir = tmp_dir / "client_0"
-            for path in [
-                client_dir / "images" / "train",
-                client_dir / "images" / "val",
-                client_dir / "labels" / "train",
-                client_dir / "labels" / "val",
-            ]:
-                path.mkdir(parents=True, exist_ok=True)
+            try:
+                for path in [
+                    client_dir / "images" / "train",
+                    client_dir / "images" / "val",
+                    client_dir / "labels" / "train",
+                    client_dir / "labels" / "val",
+                ]:
+                    path.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                self.skipTest(f"temp dir not writable: {exc}")
 
             shard_yaml = client_dir / "data.yaml"
             shard_yaml.write_text(
@@ -91,14 +101,14 @@ class DataPortabilityTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            normalized = _normalize_client_shard_yaml(shard_yaml)
-            self.assertEqual(Path(normalized), shard_yaml.resolve())
-
-            client_cfg = yaml.safe_load(shard_yaml.read_text(encoding="utf-8"))
-            self.assertEqual(client_cfg["path"], ".")
-            self.assertEqual(client_cfg["train"], "images/train")
-            self.assertEqual(client_cfg["val"], "images/val")
-            self.assertEqual(client_cfg["nc"], 80)
+            runtime_yaml = _materialize_runtime_yaml(shard_yaml)
+            runtime_cfg = yaml.safe_load(Path(runtime_yaml).read_text(encoding="utf-8"))
+            self.assertEqual(Path(runtime_yaml).parent, shard_yaml.parent.resolve())
+            self.assertTrue(Path(runtime_cfg["train"]).is_absolute())
+            self.assertTrue(Path(runtime_cfg["val"]).is_absolute())
+            self.assertEqual(Path(runtime_cfg["train"]).parent.name, "train")
+            self.assertEqual(Path(runtime_cfg["val"]).parent.name, "val")
+            self.assertEqual(runtime_cfg["nc"], 80)
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 

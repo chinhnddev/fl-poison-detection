@@ -84,8 +84,8 @@ def _load_attack_cfg(cfg: Dict, cid: int) -> tuple[LabelFlipConfig, BBoxDistorti
     return label_flip, bbox, removal, backdoor, model_poison
 
 
-def _normalize_client_shard_yaml(shard_yaml: Path) -> str:
-    """Rewrite client shard YAMLs into a portable, machine-local form."""
+def _materialize_runtime_yaml(shard_yaml: Path) -> str:
+    """Create a runtime data.yaml with absolute paths for Ultralytics."""
     client_dir = shard_yaml.parent
     train_dir = client_dir / "images" / "train"
     val_dir = client_dir / "images" / "val"
@@ -93,20 +93,23 @@ def _normalize_client_shard_yaml(shard_yaml: Path) -> str:
         return str(shard_yaml.resolve())
 
     cfg = yaml.safe_load(shard_yaml.read_text(encoding="utf-8")) or {}
-    portable_cfg = {
-        "path": ".",
-        "train": "images/train",
-        "val": "images/val",
+    runtime_cfg = {
+        "path": str(client_dir.resolve()),
+        "train": str(train_dir.resolve()),
+        "val": str(val_dir.resolve()),
     }
     for key, value in cfg.items():
         if key not in {"path", "train", "val"}:
-            portable_cfg[key] = value
+            runtime_cfg[key] = value
 
-    if cfg != portable_cfg:
-        shard_yaml.write_text(yaml.safe_dump(portable_cfg, sort_keys=False), encoding="utf-8")
-        logging.getLogger("client").info("normalized_client_yaml shard=%s", shard_yaml.resolve())
-
-    return str(shard_yaml.resolve())
+    out_yaml = client_dir / "data.runtime.yaml"
+    out_yaml.write_text(yaml.safe_dump(runtime_cfg, sort_keys=False), encoding="utf-8")
+    logging.getLogger("client").info(
+        "runtime_client_yaml shard=%s runtime=%s",
+        shard_yaml.resolve(),
+        out_yaml.resolve(),
+    )
+    return str(out_yaml.resolve())
 
 
 class YoloDeltaClient(fl.client.NumPyClient):
@@ -124,7 +127,7 @@ class YoloDeltaClient(fl.client.NumPyClient):
         shard_yaml = fed_dir / f"client_{self.cid}" / "data.yaml"
         if not shard_yaml.exists():
             raise FileNotFoundError(f"Missing client shard: {shard_yaml}")
-        self.data_yaml = _normalize_client_shard_yaml(shard_yaml)
+        self.data_yaml = _materialize_runtime_yaml(shard_yaml)
 
         self.label_flip, self.bbox, self.removal, self.backdoor, self.model_poison = _load_attack_cfg(cfg, self.cid)
 
