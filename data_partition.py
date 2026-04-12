@@ -427,9 +427,10 @@ def write_federated_shards(
         _write_client_view(client_dir, train_imgs=imgs, val_imgs=val_images)
 
         client_yaml = {
-            "path": str(client_dir.resolve()),
-            "train": str((client_dir / "images" / "train").resolve()),
-            "val": str((client_dir / "images" / "val").resolve())
+            # Keep shard YAML portable across Windows/Linux and across copied workspaces.
+            "path": ".",
+            "train": "images/train",
+            "val": "images/val",
         }
         if nc is not None:
             client_yaml["nc"] = nc

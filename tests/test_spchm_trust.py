@@ -179,7 +179,7 @@ class SPCHMTrustUnitTests(unittest.TestCase):
         self.assertIn("removed_cids", robust_info)
         self.assertIn("removed_cids", detection_info)
 
-    def test_poisoned_dataset_yaml_resolves_absolute_val_path(self) -> None:
+    def test_poisoned_dataset_yaml_is_portable_and_resolves_val_path(self) -> None:
         tmp_path = (Path.cwd() / "tmp" / "test_poisoned_dataset_yaml").resolve()
         if tmp_path.exists():
             shutil.rmtree(tmp_path, ignore_errors=True)
@@ -219,9 +219,13 @@ class SPCHMTrustUnitTests(unittest.TestCase):
                 backdoor=BackdoorConfig(enabled=False),
             )
             poisoned_cfg = yaml.safe_load(Path(out_yaml).read_text(encoding="utf-8"))
-            self.assertTrue(Path(poisoned_cfg["train"]).is_absolute())
-            self.assertTrue(Path(poisoned_cfg["val"]).is_absolute())
-            self.assertEqual(Path(poisoned_cfg["val"]).as_posix(), (client_dir / "images" / "val").resolve().as_posix())
+            poison_dir = Path(out_yaml).parent
+            self.assertEqual(poisoned_cfg["path"], ".")
+            self.assertEqual(poisoned_cfg["train"], "train.txt")
+            self.assertTrue((poison_dir / poisoned_cfg["train"]).exists())
+            val_ref = Path(poisoned_cfg["val"])
+            resolved_val = val_ref if val_ref.is_absolute() else (poison_dir / val_ref).resolve()
+            self.assertEqual(resolved_val.as_posix(), (client_dir / "images" / "val").resolve().as_posix())
         finally:
             shutil.rmtree(tmp_path, ignore_errors=True)
 
@@ -273,12 +277,13 @@ class SPCHMTrustUnitTests(unittest.TestCase):
                 ),
             )
             poisoned_cfg = yaml.safe_load(Path(out_yaml).read_text(encoding="utf-8"))
-            train_lines = [line.strip() for line in Path(poisoned_cfg["train"]).read_text(encoding="utf-8").splitlines() if line.strip()]
+            train_txt = Path(out_yaml).parent / poisoned_cfg["train"]
+            train_lines = [line.strip() for line in train_txt.read_text(encoding="utf-8").splitlines() if line.strip()]
             meta = yaml.safe_load((tmp_path / "poison" / "poison_meta.yaml").read_text(encoding="utf-8"))
             self.assertEqual(len(train_lines), 3)
             self.assertEqual(meta["poisoned_images_backdoor"], 1)
             self.assertEqual(meta["poisoned_images_backdoor_replayed"], 2)
-            for image_path in [Path(line) for line in train_lines]:
+            for image_path in [(train_txt.parent / Path(line)).resolve() for line in train_lines]:
                 self.assertTrue(image_path.exists())
                 with Image.open(image_path) as im:
                     self.assertEqual(im.size, (32, 32))

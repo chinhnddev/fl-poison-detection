@@ -45,18 +45,28 @@ def _read_image_list_from_data_yaml(data_yaml: str) -> List[Path]:
     with open(yp, "r", encoding="utf-8") as f:
         cfg: Dict = yaml.safe_load(f)
     train_ref = cfg["train"]
-    p = _resolve_ref(cfg, str(train_ref), yp)
-    if p.suffix.lower() == ".txt" and p.exists():
+    ref_path = _resolve_ref(cfg, str(train_ref), yp)
+    if ref_path.suffix.lower() == ".txt" and ref_path.exists():
         out = []
-        for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+        for line in ref_path.read_text(encoding="utf-8", errors="replace").splitlines():
             line = line.strip()
             if line:
-                out.append(Path(line))
+                img_path = Path(line)
+                if not img_path.is_absolute():
+                    img_path = (ref_path.parent / img_path).resolve()
+                out.append(img_path)
         return out
-    if p.exists() and p.is_dir():
+    if ref_path.exists() and ref_path.is_dir():
         exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
-        return [x for x in p.rglob("*") if x.suffix.lower() in exts]
+        return [x for x in ref_path.rglob("*") if x.suffix.lower() in exts]
     raise FileNotFoundError(f"Unsupported train reference in data.yaml: {train_ref}")
+
+
+def _portable_ref(target: Path, start: Path) -> str:
+    try:
+        return Path(os.path.relpath(target.resolve(), start=start.resolve())).as_posix()
+    except Exception:
+        return str(target.resolve())
 
 
 def _copy_or_link(src: Path, dst: Path) -> None:
@@ -416,20 +426,20 @@ def build_poisoned_dataset(
             poisoned_images_bbox += int(bool(do_bb))
             poisoned_images_removal += int(bool(do_rm))
 
-            f.write(str(dst_img.resolve()) + "\n")
+            f.write(_portable_ref(dst_img.resolve(), train_txt.parent) + "\n")
             if do_bd and backdoor.enabled and backdoor_oversample_factor > 1:
                 for rep_idx in range(1, backdoor_oversample_factor):
                     rep_img = out_images / f"{dst_img.stem}__bdrep{rep_idx}{dst_img.suffix}"
                     rep_lbl = out_labels / f"{dst_img.stem}__bdrep{rep_idx}.txt"
                     _copy_or_link(dst_img, rep_img)
                     _copy_or_link(dst_lbl, rep_lbl)
-                    f.write(str(rep_img.resolve()) + "\n")
+                    f.write(_portable_ref(rep_img.resolve(), train_txt.parent) + "\n")
                     poisoned_images_backdoor_replayed += 1
 
     out_yaml = {
-        "path": str(out_root_p.resolve()),
-        "train": str(train_txt.resolve()),
-        "val": str(resolved_val_ref.resolve()) if resolved_val_ref is not None else "",
+        "path": ".",
+        "train": train_txt.name,
+        "val": _portable_ref(resolved_val_ref.resolve(), out_root_p) if resolved_val_ref is not None else "",
     }
     if nc is not None:
         out_yaml["nc"] = nc
