@@ -189,23 +189,6 @@ class YoloDeltaClient(fl.client.NumPyClient):
             out_dir = Path(cfg["runtime"]["tmp_dir"]) / "poison" / f"client_{self.cid}_{sig}"
             out_yaml = out_dir / "data.yaml"
             reuse_poison_cache = bool(((cfg.get("attack") or {}).get("reuse_poison_cache", True)))
-            if out_yaml.exists() and not _poison_yaml_is_valid(out_yaml):
-                logging.getLogger("client").warning(
-                    "poison_cache_invalid cid=%s yaml=%s -> rebuilding",
-                    self.cid,
-                    out_yaml.resolve(),
-                )
-                try:
-                    for p in out_dir.rglob("*"):
-                        if p.is_file():
-                            p.unlink()
-                    for p in sorted([d for d in out_dir.rglob("*") if d.is_dir()], reverse=True):
-                        try:
-                            p.rmdir()
-                        except OSError:
-                            pass
-                except Exception:
-                    pass
             if (not out_yaml.exists()) and reuse_poison_cache:
                 # Reuse any existing poisoned cache for this client to avoid expensive rebuilds.
                 # NOTE: This can reuse stale caches if attack settings changed.
@@ -215,9 +198,8 @@ class YoloDeltaClient(fl.client.NumPyClient):
                     key=lambda p: p.stat().st_mtime,
                     reverse=True,
                 )
-                reuse_yaml = next((p for p in candidates if _poison_yaml_is_valid(p)), None)
-                if reuse_yaml is not None:
-                    out_yaml = reuse_yaml
+                if candidates:
+                    out_yaml = candidates[0]
                     logging.getLogger("client").warning(
                         "poison_cache_reused cid=%s yaml=%s",
                         self.cid,
