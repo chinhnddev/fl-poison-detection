@@ -59,6 +59,46 @@ def _tail_text(path: Path, max_lines: int = 120) -> str:
     return "\n".join(lines[-max_lines:])
 
 
+def _echo_client_progress(
+    log_dir: Path,
+    malicious_cids: set[int],
+    offsets: dict[int, int],
+    announced: set[tuple[int, str]],
+) -> None:
+    """Mirror important malicious-client progress lines to the main console."""
+    for cid in sorted(malicious_cids):
+        log_path = log_dir / f"client_{cid}.log"
+        if not log_path.exists():
+            continue
+        try:
+            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                f.seek(offsets.get(cid, 0))
+                chunk = f.read()
+                offsets[cid] = f.tell()
+        except Exception:
+            continue
+        if not chunk:
+            continue
+        for raw_line in chunk.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            event = None
+            if "poison_ready" in line:
+                event = "poison_ready"
+            elif "FIT_START" in line:
+                event = "fit_start"
+            elif "FIT_END" in line:
+                event = "fit_end"
+            if event is None:
+                continue
+            key = (cid, event)
+            if key in announced:
+                continue
+            print(f"[client {cid}] {line}", flush=True)
+            announced.add(key)
+
+
 def main():
     repo_root = Path(__file__).resolve().parent
     ap = argparse.ArgumentParser()
@@ -268,12 +308,33 @@ def main():
             clients.append(c)
 
 # 5) wait for experiment to finish
+        client_offsets = {cid: 0 for cid in malicious}
+        client_announced: set[tuple[int, str]] = set()
+        wait_started = time.time()
+        timed_out = False
         try:
             rt = float(args.run_timeout_s)
-            if rt > 0:
-                server.wait(timeout=rt)
+            while True:
+                _echo_client_progress(log_dir, malicious, client_offsets, client_announced)
+                if server.poll() is not None:
+                    break
+                if rt > 0 and (time.time() - wait_started) > rt:
+                    timed_out = True
+                    break
+                time.sleep(2.0)
+            if timed_out:
+                print("Server timeout -> check logs")
+                try:
+                    server_log.flush()
+                except Exception:
+                    pass
+                tail = _tail_text(server_log_path)
+                if tail:
+                    print("--- server.log (tail) ---")
+                    print(tail)
             else:
-                server.wait()
+                _echo_client_progress(log_dir, malicious, client_offsets, client_announced)
+                server.wait(timeout=0.1)
         except subprocess.TimeoutExpired:
             print("Server timeout -> check logs")
             try:
