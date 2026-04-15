@@ -19,6 +19,7 @@ from defense.spchm_trust import (
     run_spchm_trust_round,
     score_prediction_consistency,
 )
+from federated.client_app import _materialize_runtime_yaml
 
 
 class SPCHMTrustUnitTests(unittest.TestCase):
@@ -226,6 +227,106 @@ class SPCHMTrustUnitTests(unittest.TestCase):
             val_ref = Path(poisoned_cfg["val"])
             resolved_val = val_ref if val_ref.is_absolute() else (poison_dir / val_ref).resolve()
             self.assertEqual(resolved_val.as_posix(), (client_dir / "images" / "val").resolve().as_posix())
+        finally:
+            shutil.rmtree(tmp_path, ignore_errors=True)
+
+    def test_client_runtime_yaml_uses_absolute_paths(self) -> None:
+        tmp_path = (Path.cwd() / "tmp" / "test_client_runtime_yaml").resolve()
+        if tmp_path.exists():
+            shutil.rmtree(tmp_path, ignore_errors=True)
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        try:
+            client_dir = tmp_path / "client_0"
+            for path in [
+                client_dir / "images" / "train",
+                client_dir / "images" / "val",
+                client_dir / "labels" / "train",
+                client_dir / "labels" / "val",
+            ]:
+                path.mkdir(parents=True, exist_ok=True)
+
+            shard_yaml = client_dir / "data.yaml"
+            shard_yaml.write_text(
+                yaml.safe_dump(
+                    {
+                        "path": r"G:\My Drive\lv\fl-poison-detection\partitions\coco_val2017\baseline\client_0",
+                        "train": r"G:\My Drive\lv\fl-poison-detection\partitions\coco_val2017\baseline\client_0\images\train",
+                        "val": r"G:\My Drive\lv\fl-poison-detection\partitions\coco_val2017\baseline\client_0\images\val",
+                        "nc": 80,
+                        "names": ["person"],
+                    },
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+
+            runtime_yaml = _materialize_runtime_yaml(shard_yaml)
+            runtime_cfg = yaml.safe_load(Path(runtime_yaml).read_text(encoding="utf-8"))
+            self.assertEqual(Path(runtime_yaml).parent, shard_yaml.parent.resolve())
+            self.assertTrue(Path(runtime_cfg["train"]).is_absolute())
+            self.assertTrue(Path(runtime_cfg["val"]).is_absolute())
+            self.assertEqual(Path(runtime_cfg["train"]).name, "train")
+            self.assertEqual(Path(runtime_cfg["val"]).name, "val")
+            self.assertEqual(runtime_cfg["nc"], 80)
+        finally:
+            shutil.rmtree(tmp_path, ignore_errors=True)
+
+    def test_poison_runtime_yaml_resolves_train_txt_to_absolute_path(self) -> None:
+        tmp_path = (Path.cwd() / "tmp" / "test_poison_runtime_yaml").resolve()
+        if tmp_path.exists():
+            shutil.rmtree(tmp_path, ignore_errors=True)
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        try:
+            client_dir = tmp_path / "client_0"
+            for path in [
+                client_dir / "images" / "train",
+                client_dir / "images" / "val",
+                client_dir / "labels" / "train",
+                client_dir / "labels" / "val",
+            ]:
+                path.mkdir(parents=True, exist_ok=True)
+
+            train_img = client_dir / "images" / "train" / "img0.jpg"
+            val_img = client_dir / "images" / "val" / "val0.jpg"
+            Image.new("RGB", (32, 32), color=(255, 255, 255)).save(train_img)
+            Image.new("RGB", (32, 32), color=(255, 255, 255)).save(val_img)
+            (client_dir / "labels" / "train" / "img0.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+            (client_dir / "labels" / "val" / "val0.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+
+            shard_yaml = client_dir / "data.yaml"
+            shard_yaml.write_text(
+                yaml.safe_dump(
+                    {
+                        "path": ".",
+                        "train": "images/train",
+                        "val": "images/val",
+                        "nc": 1,
+                        "names": ["person"],
+                    },
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+
+            poison_yaml = build_poisoned_dataset(
+                shard_data_yaml=str(shard_yaml),
+                out_root=str(tmp_path / "poison"),
+                label_flip=LabelFlipConfig(enabled=False),
+                bbox=BBoxDistortionConfig(enabled=False),
+                removal=ObjectRemovalConfig(enabled=False),
+                backdoor=BackdoorConfig(enabled=True, poison_ratio=1.0, trigger_size=8, src_class_id=0, target_class_id=0),
+            )
+
+            poisoned_cfg = yaml.safe_load(Path(poison_yaml).read_text(encoding="utf-8"))
+            self.assertEqual(poisoned_cfg["train"], "train.txt")
+
+            runtime_yaml = _materialize_runtime_yaml(Path(poison_yaml))
+            runtime_cfg = yaml.safe_load(Path(runtime_yaml).read_text(encoding="utf-8"))
+            self.assertTrue(Path(runtime_cfg["train"]).is_absolute())
+            self.assertTrue(Path(runtime_cfg["val"]).is_absolute())
+            self.assertEqual(Path(runtime_cfg["train"]).name, "train.txt")
+            self.assertEqual(Path(runtime_cfg["train"]).parent, Path(poison_yaml).parent.resolve())
+            self.assertTrue(Path(runtime_cfg["train"]).exists())
         finally:
             shutil.rmtree(tmp_path, ignore_errors=True)
 

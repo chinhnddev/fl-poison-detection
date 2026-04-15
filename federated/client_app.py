@@ -85,24 +85,39 @@ def _load_attack_cfg(cfg: Dict, cid: int) -> tuple[LabelFlipConfig, BBoxDistorti
 
 
 def _materialize_runtime_yaml(shard_yaml: Path) -> str:
-    """Create a runtime data.yaml with absolute paths for Ultralytics."""
-    client_dir = shard_yaml.parent
-    train_dir = client_dir / "images" / "train"
-    val_dir = client_dir / "images" / "val"
-    if not train_dir.exists() or not val_dir.exists():
+    """Create a runtime data.yaml with absolute split paths for Ultralytics.
+
+    This is especially important for poisoned shards, where ``train`` may point to
+    ``train.txt``. Ultralytics combines ``path`` and ``train`` using its own rules,
+    and a portable YAML like ``path: .`` / ``train: train.txt`` can be incorrectly
+    resolved relative to the process working directory instead of the YAML location.
+    """
+    cfg = yaml.safe_load(shard_yaml.read_text(encoding="utf-8")) or {}
+    runtime_cfg = {}
+    resolved_any = False
+
+    for split in ["train", "val", "test"]:
+        ref = cfg.get(split)
+        if not ref:
+            continue
+        ref_path = Path(str(ref))
+        local_split_dir = shard_yaml.parent / "images" / split
+        if ref_path.suffix.lower() != ".txt" and local_split_dir.exists():
+            resolved = local_split_dir.resolve()
+        else:
+            resolved = _resolve_dataset_ref(cfg, str(ref), shard_yaml)
+        runtime_cfg[split] = str(resolved.resolve())
+        resolved_any = True
+
+    if not resolved_any:
         return str(shard_yaml.resolve())
 
-    cfg = yaml.safe_load(shard_yaml.read_text(encoding="utf-8")) or {}
-    runtime_cfg = {
-        "path": str(client_dir.resolve()),
-        "train": str(train_dir.resolve()),
-        "val": str(val_dir.resolve()),
-    }
+    runtime_cfg["path"] = str(shard_yaml.parent.resolve())
     for key, value in cfg.items():
-        if key not in {"path", "train", "val"}:
+        if key not in {"path", "train", "val", "test"}:
             runtime_cfg[key] = value
 
-    out_yaml = client_dir / "data.runtime.yaml"
+    out_yaml = shard_yaml if shard_yaml.name.endswith(".runtime.yaml") else shard_yaml.with_name(f"{shard_yaml.stem}.runtime.yaml")
     out_yaml.write_text(yaml.safe_dump(runtime_cfg, sort_keys=False), encoding="utf-8")
     logging.getLogger("client").info(
         "runtime_client_yaml shard=%s runtime=%s",
@@ -189,15 +204,19 @@ class YoloDeltaClient(fl.client.NumPyClient):
             out_dir = Path(cfg["runtime"]["tmp_dir"]) / "poison" / f"client_{self.cid}_{sig}"
             out_yaml = out_dir / "data.yaml"
             reuse_poison_cache = bool(((cfg.get("attack") or {}).get("reuse_poison_cache", True)))
-            if (not out_yaml.exists()) and reuse_poison_cache:
+            if ((not out_yaml.exists()) or (not _poison_yaml_is_valid(out_yaml))) and reuse_poison_cache:
                 # Reuse any existing poisoned cache for this client to avoid expensive rebuilds.
                 # NOTE: This can reuse stale caches if attack settings changed.
                 cache_root = Path(cfg["runtime"]["tmp_dir"]) / "poison"
-                candidates = sorted(
-                    cache_root.glob(f"client_{self.cid}_*/data.yaml"),
-                    key=lambda p: p.stat().st_mtime,
-                    reverse=True,
-                )
+                candidates = [
+                    p
+                    for p in sorted(
+                        cache_root.glob(f"client_{self.cid}_*/data.yaml"),
+                        key=lambda p: p.stat().st_mtime,
+                        reverse=True,
+                    )
+                    if _poison_yaml_is_valid(p)
+                ]
                 if candidates:
                     out_yaml = candidates[0]
                     logging.getLogger("client").warning(
@@ -205,7 +224,7 @@ class YoloDeltaClient(fl.client.NumPyClient):
                         self.cid,
                         out_yaml.resolve(),
                     )
-            if not out_yaml.exists():
+            if (not out_yaml.exists()) or (not _poison_yaml_is_valid(out_yaml)):
                 self.data_yaml = build_poisoned_dataset(
                     shard_data_yaml=self.data_yaml,
                     out_root=str(out_dir),
@@ -216,8 +235,9 @@ class YoloDeltaClient(fl.client.NumPyClient):
                 )
             else:
                 self.data_yaml = str(out_yaml.resolve())
+            self.data_yaml = _materialize_runtime_yaml(Path(self.data_yaml))
 
-            meta_p = out_dir / "poison_meta.yaml"
+            meta_p = Path(self.data_yaml).parent / "poison_meta.yaml"
             if meta_p.exists():
                 try:
                     meta = yaml.safe_load(open(meta_p, "r", encoding="utf-8")) or {}
