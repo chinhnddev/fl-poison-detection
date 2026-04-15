@@ -64,7 +64,8 @@ def _read_image_list_from_data_yaml(data_yaml: str) -> List[Path]:
 
 def _portable_ref(target: Path, start: Path) -> str:
     try:
-        return Path(os.path.relpath(target.resolve(), start=start.resolve())).as_posix()
+        rel = Path(os.path.relpath(target.resolve(), start=start.resolve())).as_posix()
+        return rel if rel.startswith("./") or rel.startswith("../") else "./" + rel
     except Exception:
         return str(target.resolve())
 

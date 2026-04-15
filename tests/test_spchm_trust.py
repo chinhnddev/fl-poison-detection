@@ -382,6 +382,7 @@ class SPCHMTrustUnitTests(unittest.TestCase):
             train_lines = [line.strip() for line in train_txt.read_text(encoding="utf-8").splitlines() if line.strip()]
             meta = yaml.safe_load((tmp_path / "poison" / "poison_meta.yaml").read_text(encoding="utf-8"))
             self.assertEqual(len(train_lines), 3)
+            self.assertTrue(all(line.startswith("./") or Path(line).is_absolute() for line in train_lines))
             self.assertEqual(meta["poisoned_images_backdoor"], 1)
             self.assertEqual(meta["poisoned_images_backdoor_replayed"], 2)
             for image_path in [(train_txt.parent / Path(line)).resolve() for line in train_lines]:
