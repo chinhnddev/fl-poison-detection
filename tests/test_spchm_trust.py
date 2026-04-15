@@ -19,7 +19,7 @@ from defense.spchm_trust import (
     run_spchm_trust_round,
     score_prediction_consistency,
 )
-from federated.client_app import _materialize_runtime_yaml
+from federated.client_app import _materialize_runtime_yaml, _poison_yaml_is_valid
 
 
 class SPCHMTrustUnitTests(unittest.TestCase):
@@ -180,7 +180,7 @@ class SPCHMTrustUnitTests(unittest.TestCase):
         self.assertIn("removed_cids", robust_info)
         self.assertIn("removed_cids", detection_info)
 
-    def test_poisoned_dataset_yaml_is_portable_and_resolves_val_path(self) -> None:
+    def test_poisoned_dataset_yaml_uses_absolute_paths_and_resolves_val_path(self) -> None:
         tmp_path = (Path.cwd() / "tmp" / "test_poisoned_dataset_yaml").resolve()
         if tmp_path.exists():
             shutil.rmtree(tmp_path, ignore_errors=True)
@@ -221,9 +221,10 @@ class SPCHMTrustUnitTests(unittest.TestCase):
             )
             poisoned_cfg = yaml.safe_load(Path(out_yaml).read_text(encoding="utf-8"))
             poison_dir = Path(out_yaml).parent
-            self.assertEqual(poisoned_cfg["path"], ".")
-            self.assertEqual(poisoned_cfg["train"], "train.txt")
-            self.assertTrue((poison_dir / poisoned_cfg["train"]).exists())
+            self.assertTrue(Path(poisoned_cfg["path"]).is_absolute())
+            self.assertEqual(Path(poisoned_cfg["path"]).resolve(), poison_dir.resolve())
+            self.assertTrue(Path(poisoned_cfg["train"]).is_absolute())
+            self.assertTrue(Path(poisoned_cfg["train"]).exists())
             val_ref = Path(poisoned_cfg["val"])
             resolved_val = val_ref if val_ref.is_absolute() else (poison_dir / val_ref).resolve()
             self.assertEqual(resolved_val.as_posix(), (client_dir / "images" / "val").resolve().as_posix())
@@ -318,7 +319,8 @@ class SPCHMTrustUnitTests(unittest.TestCase):
             )
 
             poisoned_cfg = yaml.safe_load(Path(poison_yaml).read_text(encoding="utf-8"))
-            self.assertEqual(poisoned_cfg["train"], "train.txt")
+            self.assertTrue(Path(poisoned_cfg["train"]).is_absolute())
+            self.assertEqual(Path(poisoned_cfg["train"]).name, "train.txt")
 
             runtime_yaml = _materialize_runtime_yaml(Path(poison_yaml))
             runtime_cfg = yaml.safe_load(Path(runtime_yaml).read_text(encoding="utf-8"))
@@ -327,6 +329,41 @@ class SPCHMTrustUnitTests(unittest.TestCase):
             self.assertEqual(Path(runtime_cfg["train"]).name, "train.txt")
             self.assertEqual(Path(runtime_cfg["train"]).parent, Path(poison_yaml).parent.resolve())
             self.assertTrue(Path(runtime_cfg["train"]).exists())
+        finally:
+            shutil.rmtree(tmp_path, ignore_errors=True)
+
+    def test_poison_yaml_validation_rejects_legacy_train_filelist(self) -> None:
+        tmp_path = (Path.cwd() / "tmp" / "test_poison_yaml_validation").resolve()
+        if tmp_path.exists():
+            shutil.rmtree(tmp_path, ignore_errors=True)
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        try:
+            poison_dir = tmp_path / "poison"
+            (poison_dir / "images" / "train").mkdir(parents=True, exist_ok=True)
+            (poison_dir / "labels" / "train").mkdir(parents=True, exist_ok=True)
+            Image.new("RGB", (16, 16), color=(255, 255, 255)).save(poison_dir / "images" / "train" / "img0.jpg")
+            (poison_dir / "labels" / "train" / "img0.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+            (poison_dir / "images" / "val").mkdir(parents=True, exist_ok=True)
+
+            (poison_dir / "train.txt").write_text("images/train/img0.jpg\n", encoding="utf-8")
+            legacy_yaml = poison_dir / "data.yaml"
+            legacy_yaml.write_text(
+                yaml.safe_dump(
+                    {
+                        "path": ".",
+                        "train": "train.txt",
+                        "val": str((poison_dir / "images" / "val").resolve()),
+                        "nc": 1,
+                        "names": ["person"],
+                    },
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            self.assertFalse(_poison_yaml_is_valid(legacy_yaml))
+
+            (poison_dir / "train.txt").write_text(str((poison_dir / "images" / "train" / "img0.jpg").resolve()) + "\n", encoding="utf-8")
+            self.assertTrue(_poison_yaml_is_valid(legacy_yaml))
         finally:
             shutil.rmtree(tmp_path, ignore_errors=True)
 
@@ -378,14 +415,14 @@ class SPCHMTrustUnitTests(unittest.TestCase):
                 ),
             )
             poisoned_cfg = yaml.safe_load(Path(out_yaml).read_text(encoding="utf-8"))
-            train_txt = Path(out_yaml).parent / poisoned_cfg["train"]
+            train_txt = Path(poisoned_cfg["train"])
             train_lines = [line.strip() for line in train_txt.read_text(encoding="utf-8").splitlines() if line.strip()]
             meta = yaml.safe_load((tmp_path / "poison" / "poison_meta.yaml").read_text(encoding="utf-8"))
             self.assertEqual(len(train_lines), 3)
-            self.assertTrue(all(line.startswith("./") or Path(line).is_absolute() for line in train_lines))
+            self.assertTrue(all(Path(line).is_absolute() for line in train_lines))
             self.assertEqual(meta["poisoned_images_backdoor"], 1)
             self.assertEqual(meta["poisoned_images_backdoor_replayed"], 2)
-            for image_path in [(train_txt.parent / Path(line)).resolve() for line in train_lines]:
+            for image_path in [Path(line).resolve() for line in train_lines]:
                 self.assertTrue(image_path.exists())
                 with Image.open(image_path) as im:
                     self.assertEqual(im.size, (32, 32))

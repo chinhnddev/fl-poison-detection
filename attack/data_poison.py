@@ -62,14 +62,6 @@ def _read_image_list_from_data_yaml(data_yaml: str) -> List[Path]:
     raise FileNotFoundError(f"Unsupported train reference in data.yaml: {train_ref}")
 
 
-def _portable_ref(target: Path, start: Path) -> str:
-    try:
-        rel = Path(os.path.relpath(target.resolve(), start=start.resolve())).as_posix()
-        return rel if rel.startswith("./") or rel.startswith("../") else "./" + rel
-    except Exception:
-        return str(target.resolve())
-
-
 def _copy_or_link(src: Path, dst: Path) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dst.exists():
@@ -372,20 +364,6 @@ def build_poisoned_dataset(
     mask_bd = _pick_mask(rng_bd_mask, cand_bd, float(backdoor.poison_ratio)) if backdoor.enabled else [False] * len(images)
 
     train_txt = out_root_p / "train.txt"
-    out_yaml = {
-        "path": ".",
-        "train": train_txt.name,
-        # Use absolute val path to avoid CWD-dependent resolution inside Ultralytics.
-        "val": str(resolved_val_ref.resolve()) if resolved_val_ref is not None else "",
-    }
-    if nc is not None:
-        out_yaml["nc"] = nc
-    if names is not None:
-        out_yaml["names"] = names
-    out_yaml_path = out_root_p / "data.yaml"
-    # Write early so downstream checks can find it even if image processing is slow.
-    with open(out_yaml_path, "w", encoding="utf-8") as f:
-        yaml.safe_dump(out_yaml, f, sort_keys=False)
     total = {"lines_in": 0, "lines_out": 0, "flipped": 0, "removed": 0, "distorted": 0, "backdoor_flipped": 0}
     poisoned_images_any = 0
     poisoned_images_label_flip = 0
@@ -441,15 +419,28 @@ def build_poisoned_dataset(
             poisoned_images_bbox += int(bool(do_bb))
             poisoned_images_removal += int(bool(do_rm))
 
-            f.write(_portable_ref(dst_img.resolve(), train_txt.parent) + "\n")
+            f.write(str(dst_img.resolve()) + "\n")
             if do_bd and backdoor.enabled and backdoor_oversample_factor > 1:
                 for rep_idx in range(1, backdoor_oversample_factor):
                     rep_img = out_images / f"{dst_img.stem}__bdrep{rep_idx}{dst_img.suffix}"
                     rep_lbl = out_labels / f"{dst_img.stem}__bdrep{rep_idx}.txt"
                     _copy_or_link(dst_img, rep_img)
                     _copy_or_link(dst_lbl, rep_lbl)
-                    f.write(_portable_ref(rep_img.resolve(), train_txt.parent) + "\n")
+                    f.write(str(rep_img.resolve()) + "\n")
                     poisoned_images_backdoor_replayed += 1
+
+    out_yaml = {
+        "path": str(out_root_p.resolve()),
+        "train": str(train_txt.resolve()),
+        "val": str(resolved_val_ref.resolve()) if resolved_val_ref is not None else "",
+    }
+    if nc is not None:
+        out_yaml["nc"] = nc
+    if names is not None:
+        out_yaml["names"] = names
+    out_yaml_path = out_root_p / "data.yaml"
+    with open(out_yaml_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(out_yaml, f, sort_keys=False)
 
     meta = {
         "attack": "dataset_poison",

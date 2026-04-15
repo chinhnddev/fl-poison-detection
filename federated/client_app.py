@@ -160,6 +160,25 @@ def _poison_yaml_is_valid(out_yaml: Path) -> bool:
         resolved = _resolve_dataset_ref(cfg, str(ref), out_yaml)
         if not resolved.exists():
             return False
+        if resolved.suffix.lower() == ".txt":
+            try:
+                lines = resolved.read_text(encoding="utf-8", errors="replace").splitlines()
+            except Exception:
+                return False
+            saw_any = False
+            for raw_line in lines:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                saw_any = True
+                p = Path(line)
+                if not p.is_absolute() and not line.startswith(("./", "../")):
+                    return False
+                resolved_item = p if p.is_absolute() else (resolved.parent / p).resolve()
+                if not resolved_item.exists():
+                    return False
+            if not saw_any:
+                return False
     return True
 
 
