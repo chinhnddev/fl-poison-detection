@@ -11,6 +11,13 @@ import socket
 import yaml
 
 
+def _abs_path(path_str: str, base_dir: Path) -> Path:
+    p = Path(str(path_str)).expanduser()
+    if p.is_absolute():
+        return p.resolve()
+    return (base_dir / p).resolve()
+
+
 def _is_port_available(host: str, port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -53,6 +60,7 @@ def _tail_text(path: Path, max_lines: int = 120) -> str:
 
 
 def main():
+    repo_root = Path(__file__).resolve().parent
     ap = argparse.ArgumentParser()
     ap.add_argument("--num_clients", type=int, default=10)
     ap.add_argument("--malicious_ratio", type=float, default=0.4)
@@ -90,11 +98,13 @@ def main():
     )
     args = ap.parse_args()
 
-    cfg = yaml.safe_load(open(args.config, "r", encoding="utf-8"))
+    config_path = _abs_path(args.config, repo_root)
+    log_dir = _abs_path(args.log_dir, repo_root)
+
+    cfg = yaml.safe_load(open(config_path, "r", encoding="utf-8"))
     seed = int(((cfg.get("runtime") or {}).get("seed")) or 1234)
     random.seed(seed)
     host, port = cfg["server"]["host"], cfg["server"]["port"]
-    log_dir = Path(args.log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     print(f"Using dataset={cfg['dataset']['base_data_yaml']} eval_data={cfg['eval']['data_yaml']}")
 
@@ -117,7 +127,7 @@ def main():
             f"num_clients={args.num_clients}"
         )
         cmd = [
-            sys.executable, "data_partition.py",
+            sys.executable, str((repo_root / "data_partition.py").resolve()),
             "--data_yaml", cfg["dataset"]["base_data_yaml"],
             "--num_clients", str(args.num_clients),
             "--out_dir", cfg["federated"]["data_dir"],
@@ -188,7 +198,7 @@ def main():
         "malicious_cids": sorted(list(malicious)),
         "rounds": int(args.rounds),
         "aggregation": str(args.aggregation),
-        "config": str(args.config),
+        "config": str(config_path),
     }
     # Defensive: ensure log_dir exists even if user launches from an unexpected CWD
     # or a previous run cleaned it up.
@@ -198,11 +208,11 @@ def main():
 
     # 2) launch server
     server_cmd = [
-        sys.executable, "server.py",
+        sys.executable, str((repo_root / "server.py").resolve()),
         "--host", host, "--port", str(port),
         "--rounds", str(args.rounds),
         "--aggregation", args.aggregation,
-        "--config", args.config,
+        "--config", str(config_path),
         "--expected_clients", str(args.num_clients),
         "--round_stats_out", str((log_dir / "round_stats.jsonl").resolve()),
     ]
@@ -218,7 +228,7 @@ def main():
 
         print(f"Starting server -> {host}:{port} (logs: {server_log_path.resolve()})")
         server_log = open(server_log_path, "w", encoding="utf-8", buffering=1)
-        server = subprocess.Popen(server_cmd, stdout=server_log, stderr=subprocess.STDOUT, text=True, env=env)
+        server = subprocess.Popen(server_cmd, stdout=server_log, stderr=subprocess.STDOUT, text=True, env=env, cwd=str(repo_root))
         # Server startup can take time (imports, weights load). Wait for the port to accept connections.
         # If the process exits early, fail fast and print the log tail for debugging.
         deadline = time.time() + float(args.server_ready_timeout_s)
@@ -249,12 +259,12 @@ def main():
             clog = open(log_dir / f"client_{cid}.log", "w", encoding="utf-8", buffering=1)
             client_logs.append(clog)
             c = subprocess.Popen([
-                sys.executable, "client.py",
+                sys.executable, str((repo_root / "client.py").resolve()),
                 "--cid", str(cid),
                 "--server_address", f"{host}:{port}",
-                "--config", args.config,
+                "--config", str(config_path),
                 "--malicious", "1" if cid in malicious else "0",
-            ], stdout=clog, stderr=subprocess.STDOUT, text=True, env=env)
+            ], stdout=clog, stderr=subprocess.STDOUT, text=True, env=env, cwd=str(repo_root))
             clients.append(c)
 
 # 5) wait for experiment to finish
@@ -324,7 +334,7 @@ def main():
     # 7) evaluate (if enabled)
     if cfg["eval"]["run_after_experiment"]:
         eval_cmd = [
-            sys.executable, "evaluate.py",
+            sys.executable, str((repo_root / "evaluate.py").resolve()),
             "--data", cfg["eval"]["data_yaml"],
             "--baseline", cfg["eval"]["baseline_model"],
             "--attacked", cfg["eval"]["attacked_model"],
@@ -340,7 +350,7 @@ def main():
             eval_cmd += ["--trigger_size", str(int(cfg["eval"].get("trigger_size", 16)))]
             eval_cmd += ["--trigger_value", str(int(cfg["eval"].get("trigger_value", 255)))]
             eval_cmd += ["--trigger_position", str(cfg["eval"].get("trigger_position", "bottom_right"))]
-        subprocess.run(eval_cmd, check=False)
+        subprocess.run(eval_cmd, check=False, cwd=str(repo_root))
 
 
 if __name__ == "__main__":
