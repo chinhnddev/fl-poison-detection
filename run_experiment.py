@@ -61,12 +61,12 @@ def _tail_text(path: Path, max_lines: int = 120) -> str:
 
 def _echo_client_progress(
     log_dir: Path,
-    malicious_cids: set[int],
+    client_cids: set[int],
     offsets: dict[int, int],
     announced: set[tuple[int, str]],
 ) -> None:
-    """Mirror important malicious-client progress lines to the main console."""
-    for cid in sorted(malicious_cids):
+    """Mirror important per-client progress lines to the main console."""
+    for cid in sorted(client_cids):
         log_path = log_dir / f"client_{cid}.log"
         if not log_path.exists():
             continue
@@ -92,7 +92,7 @@ def _echo_client_progress(
                 event = "fit_end"
             if event is None:
                 continue
-            key = (cid, event)
+            key = (cid, line)
             if key in announced:
                 continue
             print(f"[client {cid}] {line}", flush=True)
@@ -295,6 +295,12 @@ def main():
 
         # 3) launch clients
         print(f"Server is ready. Launching {args.num_clients} clients (logs: {log_dir.resolve()})")
+        honest = sorted(set(range(args.num_clients)) - malicious)
+        print(
+            f"Progress mirror: tracking all clients 0..{args.num_clients - 1} "
+            f"(malicious={sorted(malicious)}, honest={honest})",
+            flush=True,
+        )
         for cid in range(args.num_clients):
             clog = open(log_dir / f"client_{cid}.log", "w", encoding="utf-8", buffering=1)
             client_logs.append(clog)
@@ -308,14 +314,15 @@ def main():
             clients.append(c)
 
 # 5) wait for experiment to finish
-        client_offsets = {cid: 0 for cid in malicious}
+        tracked_clients = set(range(args.num_clients))
+        client_offsets = {cid: 0 for cid in tracked_clients}
         client_announced: set[tuple[int, str]] = set()
         wait_started = time.time()
         timed_out = False
         try:
             rt = float(args.run_timeout_s)
             while True:
-                _echo_client_progress(log_dir, malicious, client_offsets, client_announced)
+                _echo_client_progress(log_dir, tracked_clients, client_offsets, client_announced)
                 if server.poll() is not None:
                     break
                 if rt > 0 and (time.time() - wait_started) > rt:
@@ -333,7 +340,7 @@ def main():
                     print("--- server.log (tail) ---")
                     print(tail)
             else:
-                _echo_client_progress(log_dir, malicious, client_offsets, client_announced)
+                _echo_client_progress(log_dir, tracked_clients, client_offsets, client_announced)
                 server.wait(timeout=0.1)
         except subprocess.TimeoutExpired:
             print("Server timeout -> check logs")

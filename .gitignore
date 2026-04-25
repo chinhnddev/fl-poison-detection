@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *.pyd
 .pytest_cache/
+tests/_tmp/
 
 # Outputs / runs
 logs*/
