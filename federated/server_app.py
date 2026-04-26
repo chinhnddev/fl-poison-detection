@@ -26,6 +26,8 @@ from train_yolo import get_parameters, set_parameters_to_model
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("server")
 
+SNAPSHOT_ROUNDS = {1, 3, 5, 10}
+
 
 def _load_defense_cfg(cfg: Dict) -> DefenseConfig:
     d = cfg.get("defense") or {}
@@ -238,6 +240,10 @@ class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
         out = Path(self.out_model)
         out.parent.mkdir(parents=True, exist_ok=True)
         set_parameters_to_model(self.base_model, new_global, str(out))
+        if int(server_round) in SNAPSHOT_ROUNDS:
+            snapshot = out.with_name(f"{out.stem}_round_{int(server_round):04d}{out.suffix}")
+            set_parameters_to_model(self.base_model, new_global, str(snapshot))
+            logger.info("round=%s snapshot saved at %s", server_round, snapshot)
 
         # Persist round stats (jsonl) if requested.
         if self._round_stats_out:
@@ -295,6 +301,12 @@ def run_server(host: str, port: int, rounds: int, cfg_path: str, expected_client
     seed = int(((cfg.get("runtime") or {}).get("seed")) or 1234)
     random.seed(seed)
     np.random.seed(seed)
+
+    if round_stats_out:
+        stats_path = Path(round_stats_out)
+        stats_path.parent.mkdir(parents=True, exist_ok=True)
+        if stats_path.exists():
+            stats_path.unlink()
 
     init_params = ndarrays_to_parameters(get_parameters(cfg["model"]["initial_weights"]))
 

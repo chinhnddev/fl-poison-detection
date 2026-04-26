@@ -18,24 +18,26 @@ model:
   global_out: "./artifacts/baseline.pt"
 
 train:
-  local_epochs: 2
+  local_epochs: 1
   imgsz: 640
   batch: 8  # Reduce to 8 if CUDA OOM.
   optimizer: AdamW
-  lr0: 0.001
+  lr0: 0.0001
   lrf: 0.01
+  warmup_epochs: 0.0
+  warmup_bias_lr: 0.0001
   num_workers: 0
   device: "cuda:0"
-  # Standard clean-training augmentation for a stronger baseline.
+  # Gentle clean fine-tuning to preserve pretrained YOLOv8s utility on small client shards.
   augment: true
-  mosaic: 1.0
+  mosaic: 0.0
   mixup: 0.0
   copy_paste: 0.0
   fliplr: 0.5
   flipud: 0.0
   degrees: 0.0
-  translate: 0.1
-  scale: 0.5
+  translate: 0.03
+  scale: 0.1
   shear: 0.0
   perspective: 0.0
 

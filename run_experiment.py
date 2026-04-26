@@ -245,6 +245,9 @@ def main():
     log_dir.mkdir(parents=True, exist_ok=True)
     with open(log_dir / "run_meta.yaml", "w", encoding="utf-8") as f:
         yaml.safe_dump(meta, f, sort_keys=False)
+    round_stats_path = log_dir / "round_stats.jsonl"
+    if round_stats_path.exists():
+        round_stats_path.unlink()
 
     # 2) launch server
     server_cmd = [
@@ -254,7 +257,7 @@ def main():
         "--aggregation", args.aggregation,
         "--config", str(config_path),
         "--expected_clients", str(args.num_clients),
-        "--round_stats_out", str((log_dir / "round_stats.jsonl").resolve()),
+        "--round_stats_out", str(round_stats_path.resolve()),
     ]
     server = None
     clients = []

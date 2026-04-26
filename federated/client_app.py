@@ -349,6 +349,8 @@ class YoloDeltaClient(fl.client.NumPyClient):
                     "optimizer",
                     "lr0",
                     "lrf",
+                    "warmup_epochs",
+                    "warmup_bias_lr",
                     "mosaic",
                     "mixup",
                     "copy_paste",
