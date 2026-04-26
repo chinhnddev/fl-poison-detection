@@ -19,19 +19,20 @@ model:
 
 train:
   local_epochs: 2
-  imgsz: 320
+  imgsz: 640
   batch: 16
   num_workers: 0
   device: "cuda:0"
-  # Backdoor triggers are spatial patterns; disabling heavy augmentation improves ASR stability.
-  mosaic: 0.0
+  # Standard clean-training augmentation for a stronger baseline.
+  augment: true
+  mosaic: 1.0
   mixup: 0.0
   copy_paste: 0.0
-  fliplr: 0.0
+  fliplr: 0.5
   flipud: 0.0
   degrees: 0.0
-  translate: 0.0
-  scale: 0.0
+  translate: 0.1
+  scale: 0.5
   shear: 0.0
   perspective: 0.0
 
