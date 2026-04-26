@@ -346,6 +346,7 @@ class YoloDeltaClient(fl.client.NumPyClient):
                 k: (self.cfg.get("train") or {}).get(k)
                 for k in [
                     "augment",
+                    "optimizer",
                     "lr0",
                     "lrf",
                     "mosaic",

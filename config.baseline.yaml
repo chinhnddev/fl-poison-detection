@@ -21,6 +21,7 @@ train:
   local_epochs: 2
   imgsz: 640
   batch: 16  # Reduce to 8 if CUDA OOM.
+  optimizer: AdamW
   lr0: 0.001
   lrf: 0.01
   num_workers: 0
