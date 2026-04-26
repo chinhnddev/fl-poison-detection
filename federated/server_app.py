@@ -90,6 +90,8 @@ def _load_spchm_cfg(cfg: Dict) -> Optional[SPCHMTrustConfig]:
         k: train_cfg.get(k)
         for k in [
             "augment",
+            "lr0",
+            "lrf",
             "mosaic",
             "mixup",
             "copy_paste",

@@ -14,13 +14,15 @@ federated:
   min_fit_clients: 10
   min_available_clients: 10
 model:
-  initial_weights: "yolov8n.pt"
+  initial_weights: "yolov8s.pt"
   global_out: "./artifacts/baseline.pt"
 
 train:
   local_epochs: 2
   imgsz: 640
-  batch: 16
+  batch: 16  # Reduce to 8 if CUDA OOM.
+  lr0: 0.001
+  lrf: 0.01
   num_workers: 0
   device: "cuda:0"
   # Standard clean-training augmentation for a stronger baseline.
