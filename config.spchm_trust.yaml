@@ -44,7 +44,8 @@ train:
 
 attack:
   reuse_poison_cache: true
-  malicious_selection: "topk_src_class"
+  malicious_selection: "fixed"
+  malicious_clients: [0, 1, 7, 9]
 
   label_flip:
     enabled: false

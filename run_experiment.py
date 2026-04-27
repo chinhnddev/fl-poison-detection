@@ -106,9 +106,12 @@ def main():
     ap.add_argument("--malicious_ratio", type=float, default=0.4)
     ap.add_argument(
         "--malicious_selection",
-        choices=["random", "topk_src_class"],
+        choices=["random", "topk_src_class", "fixed"],
         default="random",
-        help="How to choose malicious clients. topk_src_class uses partition_stats.yaml and attack.(label_flip|backdoor).src_class_id.",
+        help=(
+            "How to choose malicious clients. topk_src_class uses partition_stats.yaml and "
+            "attack.(label_flip|backdoor).src_class_id; fixed uses attack.malicious_clients."
+        ),
     )
     ap.add_argument(
         "--aggregation",
@@ -215,15 +218,46 @@ def main():
             return set(random.sample(range(args.num_clients), k)) if k > 0 else set()
         return set(cid for _, cid in scored[:k])
 
+    def _choose_malicious_fixed() -> set[int]:
+        attack_cfg = cfg.get("attack") or {}
+        raw = attack_cfg.get("malicious_clients", attack_cfg.get("malicious_cids", []))
+        if isinstance(raw, str):
+            items = [x.strip() for x in raw.replace(";", ",").split(",") if x.strip()]
+        elif isinstance(raw, (list, tuple, set)):
+            items = list(raw)
+        else:
+            raise SystemExit("attack.malicious_clients must be a list or comma-separated string when malicious_selection=fixed")
+        try:
+            fixed = {int(x) for x in items}
+        except Exception as exc:
+            raise SystemExit(f"Invalid attack.malicious_clients value: {raw!r}") from exc
+        if not fixed:
+            raise SystemExit("malicious_selection=fixed requires attack.malicious_clients to contain at least one client id")
+        invalid = sorted(cid for cid in fixed if cid < 0 or cid >= args.num_clients)
+        if invalid:
+            raise SystemExit(f"Invalid malicious client id(s) for num_clients={args.num_clients}: {invalid}")
+        if len(fixed) != k:
+            print(
+                f"Using fixed malicious clients {sorted(fixed)} "
+                f"(count={len(fixed)}; malicious_ratio would select {k})",
+                flush=True,
+            )
+        return fixed
+
     # Config may override CLI selection.
     cfg_sel = str(((cfg.get("attack") or {}).get("malicious_selection")) or "").strip().lower()
     sel = args.malicious_selection
-    if cfg_sel in {"random", "topk_src_class", "topk_src_class_id", "topk_src"}:
-        sel = "topk_src_class" if cfg_sel.startswith("topk") else "random"
+    if cfg_sel in {"random", "topk_src_class", "topk_src_class_id", "topk_src", "fixed"}:
+        if cfg_sel.startswith("topk"):
+            sel = "topk_src_class"
+        else:
+            sel = cfg_sel
 
     if k > 0:
         if sel == "topk_src_class":
             malicious = _choose_malicious_topk_src_class()
+        elif sel == "fixed":
+            malicious = _choose_malicious_fixed()
         else:
             malicious = set(random.sample(range(args.num_clients), k))
     else:
