@@ -15,18 +15,22 @@ federated:
   min_available_clients: 10
 
 model:
-  initial_weights: "yolov8n.pt"
+  initial_weights: "yolov8s.pt"
   global_out: "./artifacts/spchm_trust.pt"
-  # Research setting placeholder:
-  # initial_weights: "yolov8s.pt"
 
 train:
-  local_epochs: 2
+  local_epochs: 1
   malicious_local_epochs: 6
-  imgsz: 320
-  batch: 16
+  imgsz: 640
+  batch: 8
+  optimizer: AdamW
+  lr0: 0.0001
+  lrf: 0.01
+  warmup_epochs: 0.0
+  warmup_bias_lr: 0.0001
   num_workers: 0
   device: "cuda:0"
+  augment: true
   mosaic: 0.0
   mixup: 0.0
   copy_paste: 0.0
@@ -39,6 +43,7 @@ train:
   perspective: 0.0
 
 attack:
+  reuse_poison_cache: true
   malicious_selection: "topk_src_class"
 
   label_flip:
@@ -92,7 +97,7 @@ defense:
   proxy_data_yaml: "./datasets/coco_val2017.yaml"
   proxy_max_images: 256
   proxy_conf: 0.25
-  proxy_imgsz: 320
+  proxy_imgsz: 640
 
   # Optional trigger-aware proxy pass for backdoor-focused experiments.
   # When enabled, the server also scores client/reference consistency on
@@ -105,10 +110,10 @@ defense:
 
   # Small clean root set used to compute the trusted update direction delta_root.
   root_data_yaml: "./datasets/coco_val2017.yaml"
-  root_epochs: 2
-  root_batch: 16
+  root_epochs: 1
+  root_batch: 8
   root_num_workers: 4
-  root_imgsz: 320
+  root_imgsz: 640
   root_device: "cuda:0"
 
   # SPCHM-Trust anomaly scoring and normalization.
