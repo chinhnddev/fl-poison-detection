@@ -8,7 +8,7 @@ dataset:
 
 federated:
   auto_partition: false
-  data_dir: "./federated_data_attack"
+  data_dir: "./federated_data_shared"
   partition: "iid"
   dirichlet_alpha: 2.0
   min_fit_clients: 10
@@ -20,7 +20,7 @@ model:
 
 train:
   local_epochs: 1
-  malicious_local_epochs: 6
+  malicious_local_epochs: 3
   imgsz: 640
   batch: 8
   optimizer: AdamW

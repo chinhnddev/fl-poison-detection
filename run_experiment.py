@@ -59,6 +59,13 @@ def _tail_text(path: Path, max_lines: int = 120) -> str:
     return "\n".join(lines[-max_lines:])
 
 
+def _load_partition_manifest(path: Path) -> dict:
+    try:
+        return yaml.safe_load(open(path, "r", encoding="utf-8")) or {}
+    except Exception:
+        return {}
+
+
 def _echo_client_progress(
     log_dir: Path,
     client_cids: set[int],
@@ -159,6 +166,7 @@ def main():
     # 1) partition dataset (optional, explicit via --partition)
     data_dir = Path(cfg["federated"]["data_dir"])
     shard_probe = data_dir / "client_0" / "data.yaml"
+    manifest_path = data_dir / "partition_manifest.json"
     needs_partition = args.partition or (not shard_probe.exists())
     if needs_partition:
         if not args.partition:
@@ -181,6 +189,39 @@ def main():
         ]
         subprocess.run(cmd, check=True)
         print(f"Partition manifest: {Path(cfg['federated']['data_dir']).resolve() / 'partition_manifest.json'}")
+    else:
+        manifest = _load_partition_manifest(manifest_path)
+        print(f"Reusing partition at: {data_dir.resolve()}")
+        if manifest:
+            manifest_clients = int(manifest.get("num_clients", 0) or 0)
+            manifest_partition = str(manifest.get("partition", "") or "")
+            manifest_seed = manifest.get("seed", None)
+            manifest_val_ratio = manifest.get("val_ratio", None)
+            print(
+                "Partition manifest -> "
+                f"num_clients={manifest_clients} partition={manifest_partition or '?'} "
+                f"seed={manifest_seed if manifest_seed is not None else '?'} "
+                f"val_ratio={manifest_val_ratio if manifest_val_ratio is not None else '?'}"
+            )
+            if manifest_clients and manifest_clients < int(args.num_clients):
+                raise SystemExit(
+                    f"Shared partition only has {manifest_clients} clients, but this run requested {args.num_clients}. "
+                    f"Rebuild {data_dir.resolve()} with at least {args.num_clients} clients."
+                )
+            cfg_partition = str((cfg.get("federated") or {}).get("partition", "") or "")
+            cfg_val_ratio = (cfg.get("dataset") or {}).get("val_ratio", None)
+            cfg_seed = ((cfg.get("runtime") or {}).get("seed")) or None
+            mismatch = []
+            if manifest_partition and cfg_partition and manifest_partition != cfg_partition:
+                mismatch.append(f"partition manifest={manifest_partition} config={cfg_partition}")
+            if manifest_val_ratio is not None and cfg_val_ratio is not None and float(manifest_val_ratio) != float(cfg_val_ratio):
+                mismatch.append(f"val_ratio manifest={manifest_val_ratio} config={cfg_val_ratio}")
+            if manifest_seed is not None and cfg_seed is not None and int(manifest_seed) != int(cfg_seed):
+                mismatch.append(f"seed manifest={manifest_seed} config={cfg_seed}")
+            if mismatch:
+                print("WARNING: shared partition settings differ from current config; existing shard data will be reused.")
+                for msg in mismatch:
+                    print(f"  - {msg}")
 
     def _any_attack_enabled(c: dict) -> bool:
         a = c.get("attack") or {}

@@ -388,6 +388,11 @@ def write_federated_shards(
     val_txt: str,
     out_dir: str,
     shards: List[List[Path]],
+    partition_name: str,
+    dirichlet_alpha: float,
+    seed: int,
+    val_ratio: float,
+    min_images_per_client: int,
 ) -> None:
     yp = Path(base_data_yaml)
     base_cfg: Dict = yaml.safe_load(open(yp, "r", encoding="utf-8"))
@@ -409,6 +414,11 @@ def write_federated_shards(
         "dataset_root": str(dataset_root),
         "train_txt": str(Path(train_txt).resolve()),
         "val_txt": str(Path(val_txt).resolve()),
+        "partition": str(partition_name),
+        "dirichlet_alpha": float(dirichlet_alpha),
+        "seed": int(seed),
+        "val_ratio": float(val_ratio),
+        "min_images_per_client": int(min_images_per_client),
         "num_clients": len(shards),
         "clients": {},
     }
@@ -512,6 +522,11 @@ def main() -> None:
         val_txt=val_txt,
         out_dir=out_dir,
         shards=shards,
+        partition_name=str(args.partition),
+        dirichlet_alpha=float(args.dirichlet_alpha),
+        seed=int(args.seed),
+        val_ratio=float(args.val_ratio),
+        min_images_per_client=int(args.min_images_per_client),
     )
 
     shared_val_images = _list_images(Path(val_txt))
