@@ -77,7 +77,7 @@ attack:
     trigger_value: 255
     position: "bottom_right"
     src_class_id: 0
-    target_class_id: 44  # spoon: stable COCO target for person->spoon backdoor evaluation on val2017.
+    target_class_id: 22  # zebra: lower natural co-occurrence with person and better ASR evaluation stability on this COCO split.
     prob: 1.0
     seed: 45
 
@@ -147,7 +147,7 @@ eval:
   attacked_model: "./artifacts/attack.pt"
   defended_model: "./artifacts/spchm_trust.pt"
   asr_src_class_id: 0
-  asr_target_class_id: 44
+  asr_target_class_id: 22
   asr_iou: 0.5
   # Default to relaxed for parity with the legacy attack-only benchmark. Run a
   # second evaluation with --asr_mode strict when you want a stricter check that

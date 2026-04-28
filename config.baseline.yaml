@@ -69,7 +69,7 @@ eval:
   attacked_model: "./artifacts/attack.pt"
   defended_model: "./artifacts/defended.pt"
   asr_src_class_id: 0
-  asr_target_class_id: 44
+  asr_target_class_id: 22
   asr_iou: 0.5
   asr_mode: "relaxed"
   asr_trigger: false
