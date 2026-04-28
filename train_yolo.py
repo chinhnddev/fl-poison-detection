@@ -456,6 +456,7 @@ def train_local(
     n = 0
     metrics: Dict = {}
     orig_final_eval = BaseTrainer.final_eval
+    orig_validate = BaseTrainer.validate
 
     extra = dict(train_overrides or {})
     extra = {k: v for k, v in extra.items() if v is not None}
@@ -463,9 +464,13 @@ def train_local(
     _clear_yolo_label_caches(data_yaml)
 
     try:
-        # Ultralytics always runs BaseTrainer.final_eval() after train(), which
-        # triggers a full validation pass on best.pt even when val=False. For FL
-        # clients we only need the updated weights, so skip that final eval.
+        # Ultralytics still validates on the final epoch via BaseTrainer._do_train()
+        # and then runs BaseTrainer.final_eval() after training, even when val=False.
+        # For FL clients we only need the updated weights, so skip both validation paths.
+        def _skip_validate(self):
+            return getattr(self, "metrics", {}), 0.0
+
+        BaseTrainer.validate = _skip_validate
         BaseTrainer.final_eval = lambda self: None
         model.train(
             data=data_yaml,
@@ -507,6 +512,7 @@ def train_local(
         n = count_train_images(data_yaml, trainer=trainer)
         metrics = {"train_images": n, "_ckpt_path": str(ckpt)}
     finally:
+        BaseTrainer.validate = orig_validate
         BaseTrainer.final_eval = orig_final_eval
         trained = None
         model = None
