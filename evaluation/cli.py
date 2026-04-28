@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional
 
 from .asr import asr_backdoor_object_level, inspect_backdoor_asr_pair
+from .device_utils import resolve_eval_device
 from .map_eval import evaluate_map
 from .perception_metrics import evaluate_perception_metrics
 
@@ -140,6 +141,8 @@ def main():
     ap.add_argument("--perception_max_images", type=int, default=0)
     ap.add_argument("--perception_class_penalty", type=float, default=0.5)
     args = ap.parse_args()
+    args.device = resolve_eval_device(args.device)
+    print(f"Using evaluation device: {args.device}")
 
     pair_info = None
     if args.asr_src_class_id >= 0 and args.asr_target_class_id >= 0:

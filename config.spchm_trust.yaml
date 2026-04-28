@@ -95,7 +95,7 @@ defense:
 
   # Shared clean proxy set used for server-side prediction consistency scoring.
   proxy_data_yaml: "./datasets/coco_val2017.yaml"
-  proxy_max_images: 256
+  proxy_max_images: 512
   proxy_conf: 0.25
   proxy_imgsz: 640
 
@@ -110,7 +110,7 @@ defense:
 
   # Small clean root set used to compute the trusted update direction delta_root.
   root_data_yaml: "./datasets/coco_val2017.yaml"
-  root_epochs: 1
+  root_epochs: 2
   root_batch: 8
   root_num_workers: 4
   root_imgsz: 640
@@ -130,7 +130,7 @@ defense:
   # Keep a small floor so a transient cosine drop does not fully erase a benign
   # client, but keep it low enough that suspicious clients cannot survive on the
   # floor alone.
-  trust_floor: 0.01
+  trust_floor: 0.0
 
   # Client-side detection stats are legacy-only and skipped in SPCHM-Trust mode.
   collect_detection_stats: false

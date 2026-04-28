@@ -7,6 +7,7 @@ from PIL import Image
 from ultralytics import YOLO
 
 from defense.spchm_trust import score_prediction_consistency
+from evaluation.device_utils import normalize_ultralytics_device
 from train_yolo import _release_torch_memory, load_dataset_images
 
 
@@ -53,6 +54,7 @@ def evaluate_perception_metrics(
 ) -> Dict[str, Optional[float]]:
     image_paths = load_dataset_images(data_yaml, split="val", max_images=max_images)
     model = YOLO(model_path)
+    resolved_device = normalize_ultralytics_device(device)
 
     total_gt = 0
     total_pred = 0
@@ -74,7 +76,13 @@ def evaluate_perception_metrics(
             for cls_id, xc, yc, bw, bh in _load_yolo_labels(_infer_label_path(image_path)):
                 gt_detections.append({"cls": int(cls_id), "xyxy": _xywhn_to_xyxy(xc, yc, bw, bh, width, height)})
 
-            res_list = model.predict(source=str(image_path), imgsz=int(imgsz), device=str(device), conf=float(conf), verbose=False)
+            res_list = model.predict(
+                source=str(image_path),
+                imgsz=int(imgsz),
+                device=resolved_device,
+                conf=float(conf),
+                verbose=False,
+            )
             pred_detections = []
             if res_list:
                 boxes = getattr(res_list[0], "boxes", None)

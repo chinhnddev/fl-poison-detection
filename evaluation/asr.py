@@ -16,6 +16,8 @@ os.environ.setdefault("YOLO_CONFIG_DIR", str(_repo_tmp.resolve()))
 
 from ultralytics import YOLO
 
+from .device_utils import normalize_ultralytics_device
+
 
 def _safe_float(x) -> Optional[float]:
     try:
@@ -375,6 +377,7 @@ def asr_backdoor_object_level(
     from PIL import Image
 
     model = YOLO(model_path)
+    resolved_device = normalize_ultralytics_device(device)
     denom = 0
     num = 0
     tdir = Path(tmp_dir)
@@ -402,7 +405,13 @@ def asr_backdoor_object_level(
             if trigger:
                 img_infer = _apply_trigger_to_temp(img, trigger_size, trigger_value, trigger_position, tdir)
 
-            res_list = model.predict(source=str(img_infer), imgsz=imgsz, device=device, conf=conf, verbose=False)
+            res_list = model.predict(
+                source=str(img_infer),
+                imgsz=imgsz,
+                device=resolved_device,
+                conf=conf,
+                verbose=False,
+            )
             if not res_list:
                 continue
             res = res_list[0]
