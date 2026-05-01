@@ -27,7 +27,7 @@ train:
   warmup_epochs: 0.0
   warmup_bias_lr: 0.0001
   num_workers: 0
-  device: "cpu"
+  device: "cuda:0"
   # Gentle clean fine-tuning to preserve pretrained YOLOv8s utility on small client shards.
   augment: true
   mosaic: 0.0
