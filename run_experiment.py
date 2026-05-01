@@ -10,6 +10,9 @@ from pathlib import Path
 import socket
 import yaml
 
+from evaluation.device_utils import resolve_eval_device
+from evaluation.round_tracking import evaluate_round_checkpoints, load_round_tracking_cfg
+
 
 def _abs_path(path_str: str, base_dir: Path) -> Path:
     p = Path(str(path_str)).expanduser()
@@ -476,6 +479,40 @@ def main():
     print(f"Aggregation: {args.aggregation}")
     print(f"Malicious clients: {sorted(list(malicious))}")
     print(f"Global model saved at: {Path(cfg['model']['global_out']).resolve()}")
+
+    round_tracking_cfg = load_round_tracking_cfg(cfg)
+    if round_tracking_cfg["enabled"]:
+        try:
+            eval_device = resolve_eval_device(round_tracking_cfg["device"])
+            print(
+                "Evaluating round checkpoints -> "
+                f"data={round_tracking_cfg['data_yaml']} imgsz={round_tracking_cfg['imgsz']} device={eval_device}"
+            )
+            tracking_out = evaluate_round_checkpoints(
+                global_out=str(cfg["model"]["global_out"]),
+                rounds=int(args.rounds),
+                data_yaml=str(round_tracking_cfg["data_yaml"]),
+                imgsz=int(round_tracking_cfg["imgsz"]),
+                device=str(eval_device),
+                log_dir=str(log_dir),
+                tracking_cfg=round_tracking_cfg,
+            )
+            summary = tracking_out["summary"]
+            print(
+                "Round tracking summary -> "
+                f"metric={summary.get('selection_metric')} "
+                f"best_round={summary.get('best_round')} "
+                f"best_value={summary.get('best_value')} "
+                f"convergence_round={summary.get('convergence_round')}"
+            )
+            print(f"Round metrics CSV: {tracking_out['csv_path']}")
+            print(f"Round metrics JSON: {tracking_out['json_path']}")
+            if round_tracking_cfg["plot"]:
+                print(f"Round metrics plot: {tracking_out['png_path']}")
+            if tracking_out.get("best_checkpoint_path"):
+                print(f"Best checkpoint copied to: {tracking_out['best_checkpoint_path']}")
+        except Exception as exc:
+            print(f"WARNING: round tracking evaluation failed: {exc}")
 
     # 7) evaluate (if enabled)
     if cfg["eval"]["run_after_experiment"]:

@@ -65,6 +65,7 @@ runtime:
 eval:
   run_after_experiment: false
   data_yaml: "./datasets/coco_val2017.yaml"
+  imgsz: 640
   baseline_model: "./artifacts/baseline.pt"
   attacked_model: "./artifacts/attack.pt"
   defended_model: "./artifacts/defended.pt"
@@ -76,3 +77,15 @@ eval:
   trigger_size: 40
   trigger_value: 255
   trigger_position: "bottom_right"
+  round_tracking:
+    enabled: true
+    data_yaml: "./datasets/coco_val2017.yaml"
+    imgsz: 640
+    device: "cuda:0"
+    every_n_rounds: 1
+    keep_final: true
+    selection_metric: "map5095"
+    patience: 5
+    min_delta: 0.001
+    plot: true
+    copy_best_checkpoint: true

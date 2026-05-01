@@ -117,6 +117,7 @@ Notes:
 - If port is busy, `run_experiment.py` auto-switches and logs the chosen address.
 - Default configs now target `COCO val2017` with `yolov8n`.
 - Training configs use `batch: 16` and `num_workers: 4` by default; reduce them if your machine runs out of memory.
+- `eval.round_tracking` can now evaluate validation mAP at saved round checkpoints, emit `round_metrics.csv/json/png`, and copy the best checkpoint to `*_best.pt`.
 
 ## 4) Evaluate (mAP + ASR)
 
@@ -148,6 +149,32 @@ python evaluate.py \
 ```
 
 `evaluate.py` writes a table to stdout and saves YOLO validation outputs under `runs/detect/...`.
+
+## 4.1) Find The Best Federated Round
+
+To study convergence over longer runs such as 50 rounds, enable:
+
+```yaml
+eval:
+  round_tracking:
+    enabled: true
+    every_n_rounds: 1
+    selection_metric: "map5095"
+    patience: 5
+    min_delta: 0.001
+```
+
+When enabled:
+
+- The server saves round checkpoints as `artifacts/<name>_round_XXXX.pt`
+- `run_experiment.py` evaluates each saved checkpoint on the validation set after training
+- Results are written to `logs/<run>/round_metrics.csv`, `round_metrics.json`, and `round_metrics.png`
+- The best checkpoint is copied to `artifacts/<name>_best.pt`
+
+The summary reports:
+
+- `best_round`: highest validation metric among evaluated checkpoints
+- `convergence_round`: the last meaningfully improving round before `patience` consecutive checks without at least `min_delta` gain
 
 ## 5) Defense Modes
 

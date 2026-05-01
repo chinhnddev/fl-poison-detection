@@ -21,13 +21,11 @@ from defense import (
     robust_filter,
     run_spchm_trust_round,
 )
+from evaluation.round_tracking import load_round_tracking_cfg, should_save_round_snapshot
 from train_yolo import get_parameters, set_parameters_to_model
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("server")
-
-SNAPSHOT_ROUNDS = {1, 3, 5, 10}
-
 
 def _load_defense_cfg(cfg: Dict) -> DefenseConfig:
     d = cfg.get("defense") or {}
@@ -150,6 +148,7 @@ class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
     """FedAvg strategy where clients send deltas and server updates global weights."""
 
     def __init__(self, cfg: Dict, round_stats_out: str = "", **kwargs):
+        self.total_rounds = int(kwargs.pop("total_rounds", 0) or 0)
         super().__init__(**kwargs)
         self.cfg = cfg
         self.base_model = str(cfg["model"]["initial_weights"])
@@ -158,6 +157,7 @@ class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
         self._round_stats_out = str(round_stats_out)
         self._dcfg = _load_defense_cfg(cfg)
         self._spchm_cfg: Optional[SPCHMTrustConfig] = _load_spchm_cfg(cfg)
+        self._round_tracking_cfg = load_round_tracking_cfg(cfg)
         # Defense priority is handled in aggregate_fit: SPCHM-Trust, then detection-aware,
         # then the legacy gradient-only filter, then plain FedAvg.
         self._da_cfg: Optional[DetectionAwareDefenseConfig] = _load_detection_aware_cfg(cfg)
@@ -240,7 +240,11 @@ class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
         out = Path(self.out_model)
         out.parent.mkdir(parents=True, exist_ok=True)
         set_parameters_to_model(self.base_model, new_global, str(out))
-        if int(server_round) in SNAPSHOT_ROUNDS:
+        if should_save_round_snapshot(
+            server_round=int(server_round),
+            total_rounds=int(self.total_rounds),
+            tracking_cfg=self._round_tracking_cfg,
+        ):
             snapshot = out.with_name(f"{out.stem}_round_{int(server_round):04d}{out.suffix}")
             set_parameters_to_model(self.base_model, new_global, str(snapshot))
             logger.info("round=%s snapshot saved at %s", server_round, snapshot)
@@ -323,6 +327,7 @@ def run_server(host: str, port: int, rounds: int, cfg_path: str, expected_client
     strategy = DeltaFedAvgStrategy(
         cfg=cfg,
         round_stats_out=round_stats_out,
+        total_rounds=int(rounds),
         fraction_fit=1.0,
         min_fit_clients=min_fit,
         min_available_clients=min_avail,
