@@ -18,7 +18,7 @@ model:
   global_out: "./artifacts/baseline.pt"
 
 train:
-  local_epochs: 1
+  local_epochs: 2
   imgsz: 640
   batch: 8  # Reduce to 8 if CUDA OOM.
   optimizer: AdamW
