@@ -92,6 +92,19 @@ def _derive_default_split_paths(data_yaml: str) -> Tuple[Path, Path]:
     return dataset_root / "train.txt", dataset_root / "val.txt"
 
 
+def _has_existing_train_val_splits(cfg: Dict, yaml_path: Path) -> bool:
+    train_ref = str((cfg.get("train") or "")).strip()
+    val_ref = str((cfg.get("val") or "")).strip()
+    if not train_ref or not val_ref:
+        return False
+    try:
+        train_path = _resolve_ref(cfg, train_ref, yaml_path)
+        val_path = _resolve_ref(cfg, val_ref, yaml_path)
+    except Exception:
+        return False
+    return train_path.exists() and val_path.exists() and str(train_path.resolve()) != str(val_path.resolve())
+
+
 def _derive_default_out_dir(data_yaml: str) -> Path:
     yp = Path(data_yaml)
     cfg: Dict = yaml.safe_load(open(yp, "r", encoding="utf-8")) or {}
@@ -224,6 +237,32 @@ def split_train_val(
     set_global_seed(seed)
     yp = Path(data_yaml)
     cfg: Dict = yaml.safe_load(open(yp, "r", encoding="utf-8"))
+
+    # If the dataset YAML already defines distinct train/val splits and does not rely on
+    # a shared source pool, reuse them directly instead of re-splitting train.
+    if not str((cfg.get("source_train") or "")).strip() and _has_existing_train_val_splits(cfg, yp):
+        train_ref = _resolve_ref(cfg, str(cfg.get("train", "")), yp)
+        val_ref = _resolve_ref(cfg, str(cfg.get("val", "")), yp)
+        train_imgs = [p.resolve() for p in _list_images(train_ref)]
+        val_imgs = [p.resolve() for p in _list_images(val_ref)]
+
+        tpath = Path(train_txt)
+        vpath = Path(val_txt)
+        tpath.parent.mkdir(parents=True, exist_ok=True)
+        vpath.parent.mkdir(parents=True, exist_ok=True)
+
+        root = _dataset_root_from_cfg(cfg, yp)
+
+        def _rel_existing(p: Path) -> str:
+            try:
+                rel = p.resolve().relative_to(root).as_posix()
+                return rel if rel.startswith("./") else "./" + rel
+            except Exception:
+                return str(p.resolve())
+
+        tpath.write_text("\n".join(_rel_existing(p) for p in train_imgs) + "\n", encoding="utf-8")
+        vpath.write_text("\n".join(_rel_existing(p) for p in val_imgs) + "\n", encoding="utf-8")
+        return str(tpath.resolve()), str(vpath.resolve())
 
     # Prefer `source_train` as the canonical pool (so stale train.txt won't silently shrink the dataset).
     src = str((cfg.get("source_train") or "")).strip()
