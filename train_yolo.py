@@ -1,6 +1,8 @@
 import json
+import logging
 import os
 import random
+import hashlib
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -105,6 +107,86 @@ def get_parameters(model_path: str) -> NDArrays:
         model = None
         _release_torch_memory()
     return params
+
+
+def _read_dataset_nc(data_yaml: str) -> Optional[int]:
+    try:
+        cfg = yaml.safe_load(Path(data_yaml).read_text(encoding="utf-8")) or {}
+    except Exception:
+        return None
+    try:
+        nc = cfg.get("nc", None)
+        return int(nc) if nc is not None else None
+    except Exception:
+        return None
+
+
+def resolve_base_model_for_data(base_model_path: str, data_yaml: str, tmp_dir: str = "./tmp") -> str:
+    """Return a checkpoint whose detect head matches the dataset class count.
+
+    Ultralytics will automatically reshape detection heads to ``data.nc`` during
+    training. In FL we compute deltas against the server-sent global weights, so
+    the starting checkpoint must already expose the same tensor shapes that local
+    training will produce.
+    """
+    dataset_nc = _read_dataset_nc(data_yaml)
+    if dataset_nc is None or dataset_nc <= 0:
+        return str(base_model_path)
+
+    model = YOLO(base_model_path)
+    try:
+        model_yaml = getattr(model.model, "yaml", {}) or {}
+        model_nc = model_yaml.get("nc", None)
+        try:
+            model_nc = int(model_nc) if model_nc is not None else None
+        except Exception:
+            model_nc = None
+    finally:
+        model = None
+        _release_torch_memory()
+
+    if model_nc == dataset_nc:
+        return str(base_model_path)
+
+    base_path = Path(base_model_path)
+    tmp_root = Path(tmp_dir) / "adapted_models"
+    tmp_root.mkdir(parents=True, exist_ok=True)
+    cache_key = hashlib.md5(f"{base_path.resolve()}::{dataset_nc}".encode("utf-8")).hexdigest()[:10]
+    adapted_yaml = tmp_root / f"{base_path.stem}_nc{dataset_nc}_{cache_key}.yaml"
+    adapted_ckpt = tmp_root / f"{base_path.stem}_nc{dataset_nc}_{cache_key}.pt"
+
+    if adapted_ckpt.exists():
+        logging.getLogger("train_yolo").info(
+            "Using cached dataset-matched base model %s for nc=%s", adapted_ckpt.resolve(), dataset_nc
+        )
+        return str(adapted_ckpt.resolve())
+
+    base = YOLO(base_model_path)
+    try:
+        model_yaml = dict(getattr(base.model, "yaml", {}) or {})
+        if not model_yaml:
+            raise ValueError(f"Could not inspect model YAML for {base_model_path}")
+        model_yaml["nc"] = int(dataset_nc)
+        adapted_yaml.write_text(yaml.safe_dump(model_yaml, sort_keys=False), encoding="utf-8")
+    finally:
+        base = None
+        _release_torch_memory()
+
+    adapted = YOLO(str(adapted_yaml))
+    try:
+        adapted.load(base_model_path)
+        adapted.save(str(adapted_ckpt))
+    finally:
+        adapted = None
+        _release_torch_memory()
+
+    logging.getLogger("train_yolo").info(
+        "Adapted base model %s -> %s to match dataset nc=%s",
+        Path(base_model_path).resolve(),
+        adapted_ckpt.resolve(),
+        dataset_nc,
+    )
+    return str(adapted_ckpt.resolve())
 
 
 def set_parameters_to_model(base_model_path: str, params: NDArrays, out_model_path: str) -> str:

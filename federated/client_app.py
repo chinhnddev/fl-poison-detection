@@ -20,7 +20,14 @@ from attack import (
     build_poisoned_dataset,
     poison_delta,
 )
-from train_yolo import collect_detection_stats, get_parameters, set_global_seed, set_parameters_to_model, train_local
+from train_yolo import (
+    collect_detection_stats,
+    get_parameters,
+    resolve_base_model_for_data,
+    set_global_seed,
+    set_parameters_to_model,
+    train_local,
+)
 
 NDArrays = List[np.ndarray]
 
@@ -274,7 +281,11 @@ class YoloDeltaClient(fl.client.NumPyClient):
                 except Exception:
                     pass
 
-        self.base_model = str(cfg["model"]["initial_weights"])
+        self.base_model = resolve_base_model_for_data(
+            base_model_path=str(cfg["model"]["initial_weights"]),
+            data_yaml=self.data_yaml,
+            tmp_dir=str((cfg.get("runtime") or {}).get("tmp_dir", "./tmp")),
+        )
         self.device = str(cfg["train"]["device"])
         self.local_epochs = int(cfg["train"]["local_epochs"])
         self.malicious_local_epochs = int((cfg.get("train") or {}).get("malicious_local_epochs", self.local_epochs))

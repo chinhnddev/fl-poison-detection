@@ -22,7 +22,7 @@ from defense import (
     run_spchm_trust_round,
 )
 from evaluation.round_tracking import load_round_tracking_cfg, should_save_round_snapshot
-from train_yolo import get_parameters, set_parameters_to_model
+from train_yolo import get_parameters, resolve_base_model_for_data, set_parameters_to_model
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("server")
@@ -151,7 +151,11 @@ class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
         self.total_rounds = int(kwargs.pop("total_rounds", 0) or 0)
         super().__init__(**kwargs)
         self.cfg = cfg
-        self.base_model = str(cfg["model"]["initial_weights"])
+        self.base_model = resolve_base_model_for_data(
+            base_model_path=str(cfg["model"]["initial_weights"]),
+            data_yaml=str(cfg["dataset"]["base_data_yaml"]),
+            tmp_dir=str((cfg.get("runtime") or {}).get("tmp_dir", "./tmp")),
+        )
         self.out_model = str(cfg["model"]["global_out"])
         self._round_global: Optional[List[np.ndarray]] = None
         self._round_stats_out = str(round_stats_out)
@@ -312,7 +316,12 @@ def run_server(host: str, port: int, rounds: int, cfg_path: str, expected_client
         if stats_path.exists():
             stats_path.unlink()
 
-    init_params = ndarrays_to_parameters(get_parameters(cfg["model"]["initial_weights"]))
+    base_model = resolve_base_model_for_data(
+        base_model_path=str(cfg["model"]["initial_weights"]),
+        data_yaml=str(cfg["dataset"]["base_data_yaml"]),
+        tmp_dir=str((cfg.get("runtime") or {}).get("tmp_dir", "./tmp")),
+    )
+    init_params = ndarrays_to_parameters(get_parameters(base_model))
 
     min_fit = int(cfg["federated"]["min_fit_clients"])
     min_avail = int(cfg["federated"]["min_available_clients"])
