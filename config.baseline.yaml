@@ -3,12 +3,12 @@ server:
   port: 8083
 
 dataset:
-  base_data_yaml: "./datasets/coco20/coco20.yaml"
+  base_data_yaml: "./datasets/coco10/coco10.yaml"
   val_ratio: 0.2
 
 federated:
   auto_partition: false
-  data_dir: "./federated_data_coco20"
+  data_dir: "./federated_data_coco10"
   partition: "iid"
   dirichlet_alpha: 2.0
   min_fit_clients: 10
@@ -64,7 +64,7 @@ runtime:
 
 eval:
   run_after_experiment: false
-  data_yaml: "./datasets/coco20/coco20.yaml"
+  data_yaml: "./datasets/coco10/coco10.yaml"
   imgsz: 640
   baseline_model: "./artifacts/baseline.pt"
   attacked_model: "./artifacts/attack.pt"
@@ -79,7 +79,7 @@ eval:
   trigger_position: "bottom_right"
   round_tracking:
     enabled: true
-    data_yaml: "./datasets/coco20/coco20.yaml"
+    data_yaml: "./datasets/coco10/coco10.yaml"
     imgsz: 640
     device: "cuda:0"
     every_n_rounds: 1
