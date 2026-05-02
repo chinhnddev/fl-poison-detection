@@ -8,7 +8,7 @@ dataset:
 
 federated:
   auto_partition: false
-  data_dir: "./federated_data_shared"
+  data_dir: "./federated_data_coco20"
   partition: "iid"
   dirichlet_alpha: 2.0
   min_fit_clients: 10
