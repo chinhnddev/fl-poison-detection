@@ -3,12 +3,12 @@ server:
   port: 8087
 
 dataset:
-  base_data_yaml: "./datasets/coco_val2017.yaml"
+  base_data_yaml: "./datasets/coco10/coco10.yaml"
   val_ratio: 0.2
 
 federated:
   auto_partition: false
-  data_dir: "./federated_data_shared"
+  data_dir: "./federated_data_coco10"
   partition: "iid"
   dirichlet_alpha: 2.0
   min_fit_clients: 10
@@ -94,7 +94,7 @@ defense:
   spchm_trust: true
 
   # Shared clean proxy set used for server-side prediction consistency scoring.
-  proxy_data_yaml: "./datasets/coco_val2017.yaml"
+  proxy_data_yaml: "./datasets/coco10/coco10.yaml"
   proxy_max_images: 512
   proxy_conf: 0.25
   proxy_imgsz: 640
@@ -109,7 +109,7 @@ defense:
   proxy_trigger_mode: "max"
 
   # Small clean root set used to compute the trusted update direction delta_root.
-  root_data_yaml: "./datasets/coco_val2017.yaml"
+  root_data_yaml: "./datasets/coco10/coco10.yaml"
   root_epochs: 2
   root_batch: 8
   root_num_workers: 4
@@ -142,7 +142,7 @@ runtime:
 
 eval:
   run_after_experiment: false
-  data_yaml: "./datasets/coco_val2017.yaml"
+  data_yaml: "./datasets/coco10/coco10.yaml"
   imgsz: 640
   baseline_model: "./artifacts/baseline.pt"
   attacked_model: "./artifacts/attack.pt"
@@ -160,7 +160,7 @@ eval:
   trigger_position: "bottom_right"
   round_tracking:
     enabled: true
-    data_yaml: "./datasets/coco_val2017.yaml"
+    data_yaml: "./datasets/coco10/coco10.yaml"
     imgsz: 640
     device: "cuda:0"
     every_n_rounds: 1

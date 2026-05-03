@@ -17,6 +17,18 @@ class RoundMetricRow:
     map5095: Optional[float]
 
 
+def _safe_float(val: object) -> Optional[float]:
+    try:
+        if val is None:
+            return None
+        s = str(val).strip()
+        if s == "":
+            return None
+        return float(s)
+    except Exception:
+        return None
+
+
 def load_round_tracking_cfg(cfg: Dict) -> Dict:
     eval_cfg = cfg.get("eval") or {}
     rtcfg = dict(eval_cfg.get("round_tracking") or {})
@@ -60,14 +72,36 @@ def should_save_round_snapshot(server_round: int, total_rounds: int, tracking_cf
     return keep_final and int(server_round) == int(total_rounds)
 
 
-def discover_round_checkpoints(global_out: str, rounds: int) -> List[tuple[int, Path]]:
+def discover_round_checkpoints(global_out: str, start_round: int, end_round: int) -> List[tuple[int, Path]]:
     out = Path(global_out)
     found: List[tuple[int, Path]] = []
-    for round_idx in range(1, int(rounds) + 1):
+    for round_idx in range(int(start_round), int(end_round) + 1):
         candidate = out.with_name(f"{out.stem}_round_{int(round_idx):04d}{out.suffix}")
         if candidate.exists():
             found.append((int(round_idx), candidate.resolve()))
     return found
+
+
+def _read_round_metrics_csv(path: Path) -> List[RoundMetricRow]:
+    if not path.exists():
+        return []
+    rows: List[RoundMetricRow] = []
+    with open(path, "r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            try:
+                rid = int(row.get("round", ""))
+            except Exception:
+                continue
+            rows.append(
+                RoundMetricRow(
+                    round=rid,
+                    model_path=str(row.get("model_path", "")),
+                    map50=_safe_float(row.get("map50")),
+                    map5095=_safe_float(row.get("map5095")),
+                )
+            )
+    return rows
 
 
 def summarize_round_metrics(rows: Sequence[RoundMetricRow], selection_metric: str, patience: int, min_delta: float) -> Dict:
@@ -197,6 +231,7 @@ def evaluate_round_checkpoints(
     *,
     global_out: str,
     rounds: int,
+    start_round: int,
     data_yaml: str,
     imgsz: int,
     device: str,
@@ -205,7 +240,9 @@ def evaluate_round_checkpoints(
 ) -> Dict:
     from .map_eval import evaluate_map
 
-    checkpoints = discover_round_checkpoints(global_out=global_out, rounds=rounds)
+    start_round = max(1, int(start_round))
+    end_round = int(start_round) + int(rounds) - 1
+    checkpoints = discover_round_checkpoints(global_out=global_out, start_round=start_round, end_round=end_round)
     rows: List[RoundMetricRow] = []
     for round_idx, model_path in checkpoints:
         mm = evaluate_map(str(model_path), data_yaml, imgsz, device)
@@ -218,21 +255,27 @@ def evaluate_round_checkpoints(
             )
         )
 
+    out_dir = Path(log_dir).resolve()
+    csv_path = out_dir / "round_metrics.csv"
+    existing_rows = _read_round_metrics_csv(csv_path)
+    merged: Dict[int, RoundMetricRow] = {int(r.round): r for r in existing_rows}
+    for row in rows:
+        merged[int(row.round)] = row
+    merged_rows = [merged[k] for k in sorted(merged.keys())]
+
     summary = summarize_round_metrics(
-        rows=rows,
+        rows=merged_rows,
         selection_metric=str(tracking_cfg.get("selection_metric", "map5095")),
         patience=int(tracking_cfg.get("patience", 5)),
         min_delta=float(tracking_cfg.get("min_delta", 0.001)),
     )
 
-    out_dir = Path(log_dir).resolve()
-    csv_path = out_dir / "round_metrics.csv"
     json_path = out_dir / "round_metrics.json"
     png_path = out_dir / "round_metrics.png"
-    write_round_metrics_csv(rows, csv_path)
-    write_round_metrics_json(rows, summary, json_path)
+    write_round_metrics_csv(merged_rows, csv_path)
+    write_round_metrics_json(merged_rows, summary, json_path)
     if bool(tracking_cfg.get("plot", True)):
-        plot_round_metrics(rows, summary, png_path)
+        plot_round_metrics(merged_rows, summary, png_path)
 
     best_ckpt_out = ""
     if bool(tracking_cfg.get("copy_best_checkpoint", True)) and summary.get("best_model_path"):
@@ -244,7 +287,7 @@ def evaluate_round_checkpoints(
         best_ckpt_out = str(dst)
 
     return {
-        "rows": rows,
+        "rows": merged_rows,
         "summary": summary,
         "csv_path": str(csv_path),
         "json_path": str(json_path),

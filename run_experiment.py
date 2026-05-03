@@ -130,6 +130,9 @@ def main():
         help="Research experiments use FedAvg; robustness comes from defenses on deltas.",
     )
     ap.add_argument("--rounds", type=int, default=5)
+    ap.add_argument("--start_round", type=int, default=16)
+    ap.add_argument("--resume_weights", default="", help="Resume global model from this .pt checkpoint")
+    ap.add_argument("--is_attack", action="store_true", help="Force malicious clients to participate from the first round")
     ap.add_argument("--config", default="config.baseline.yaml")
     ap.add_argument("--log_dir", default="./logs", help="Write server/client logs here")
     ap.add_argument(
@@ -157,6 +160,7 @@ def main():
     cfg = yaml.safe_load(open(config_path, "r", encoding="utf-8"))
     seed = int(((cfg.get("runtime") or {}).get("seed")) or 1234)
     random.seed(seed)
+    start_round = max(1, int(args.start_round))
     host, port = cfg["server"]["host"], cfg["server"]["port"]
     log_dir.mkdir(parents=True, exist_ok=True)
     print(f"Using dataset={cfg['dataset']['base_data_yaml']} eval_data={cfg['eval']['data_yaml']}")
@@ -235,7 +239,7 @@ def main():
 
     # 4) malicious assignment
     # Baseline runs should not sample "malicious" clients at all (keeps logs/results unambiguous).
-    if not _any_attack_enabled(cfg):
+    if not _any_attack_enabled(cfg) and not bool(args.is_attack):
         k = 0
     else:
         k = math.floor(args.num_clients * args.malicious_ratio)
@@ -315,6 +319,9 @@ def main():
         "malicious_selection": str(sel),
         "malicious_cids": sorted(list(malicious)),
         "rounds": int(args.rounds),
+        "start_round": int(start_round),
+        "resume_weights": str(args.resume_weights) if args.resume_weights else "",
+        "is_attack": bool(args.is_attack),
         "aggregation": str(args.aggregation),
         "config": str(config_path),
     }
@@ -324,7 +331,7 @@ def main():
     with open(log_dir / "run_meta.yaml", "w", encoding="utf-8") as f:
         yaml.safe_dump(meta, f, sort_keys=False)
     round_stats_path = log_dir / "round_stats.jsonl"
-    if round_stats_path.exists():
+    if round_stats_path.exists() and int(start_round) <= 1:
         round_stats_path.unlink()
 
     # 2) launch server
@@ -332,11 +339,16 @@ def main():
         sys.executable, str((repo_root / "server.py").resolve()),
         "--host", host, "--port", str(port),
         "--rounds", str(args.rounds),
+        "--start_round", str(start_round),
         "--aggregation", args.aggregation,
         "--config", str(config_path),
         "--expected_clients", str(args.num_clients),
         "--round_stats_out", str(round_stats_path.resolve()),
     ]
+    if args.resume_weights:
+        server_cmd += ["--resume_weights", str(args.resume_weights)]
+    if int(start_round) > 1:
+        server_cmd.append("--append_round_stats")
     server = None
     clients = []
     bad = []
@@ -479,6 +491,8 @@ def main():
     print(f"Aggregation: {args.aggregation}")
     print(f"Malicious clients: {sorted(list(malicious))}")
     print(f"Global model saved at: {Path(cfg['model']['global_out']).resolve()}")
+    if args.resume_weights:
+        print(f"Resumed from: {Path(args.resume_weights).resolve()}")
 
     round_tracking_cfg = load_round_tracking_cfg(cfg)
     if round_tracking_cfg["enabled"]:
@@ -491,6 +505,7 @@ def main():
             tracking_out = evaluate_round_checkpoints(
                 global_out=str(cfg["model"]["global_out"]),
                 rounds=int(args.rounds),
+                start_round=int(start_round),
                 data_yaml=str(round_tracking_cfg["data_yaml"]),
                 imgsz=int(round_tracking_cfg["imgsz"]),
                 device=str(eval_device),

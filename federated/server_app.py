@@ -147,12 +147,15 @@ def _load_spchm_cfg(cfg: Dict) -> Optional[SPCHMTrustConfig]:
 class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
     """FedAvg strategy where clients send deltas and server updates global weights."""
 
-    def __init__(self, cfg: Dict, round_stats_out: str = "", **kwargs):
+    def __init__(self, cfg: Dict, round_stats_out: str = "", start_round: int = 1, base_model_path: str | None = None, **kwargs):
         self.total_rounds = int(kwargs.pop("total_rounds", 0) or 0)
         super().__init__(**kwargs)
         self.cfg = cfg
+        self.start_round = max(1, int(start_round))
+        self._round_offset = int(self.start_round) - 1
+        base_model_path = str(base_model_path) if base_model_path else str(cfg["model"]["initial_weights"])
         self.base_model = resolve_base_model_for_data(
-            base_model_path=str(cfg["model"]["initial_weights"]),
+            base_model_path=base_model_path,
             data_yaml=str(cfg["dataset"]["base_data_yaml"]),
             tmp_dir=str((cfg.get("runtime") or {}).get("tmp_dir", "./tmp")),
         )
@@ -172,8 +175,9 @@ class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
         except Exception:
             self._round_global = None
         pairs = super().configure_fit(server_round, parameters, client_manager)
+        round_id = int(server_round) + int(self._round_offset)
         for _, fit_ins in pairs:
-            fit_ins.config["server_round"] = int(server_round)
+            fit_ins.config["server_round"] = int(round_id)
         return pairs
 
     def aggregate_fit(
@@ -182,6 +186,7 @@ class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
         results: List[Tuple[ClientProxy, FitRes]],
         failures,
     ) -> Tuple[Optional[Parameters], Dict[str, Scalar]]:
+        round_id = int(server_round) + int(self._round_offset)
         if not results:
             return None, {}
         if self._round_global is None:
@@ -196,7 +201,7 @@ class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
             metrics = dict(fr.metrics) if fr.metrics else {}
             updates_delta.append((cp.cid, delta, fr.num_examples))
             metrics_rows.append({"cid": cp.cid, "num_examples": fr.num_examples, **metrics})
-            logger.info("round=%s client=%s num_examples=%s metrics=%s", server_round, cp.cid, fr.num_examples, metrics)
+            logger.info("round=%s client=%s num_examples=%s metrics=%s", round_id, cp.cid, fr.num_examples, metrics)
 
         filtered = list(updates_delta)
         dmeta: Dict = {"removed_cids": [], "reason": "defense_disabled"}
@@ -209,12 +214,12 @@ class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
                 global_params=self._round_global,
                 cfg=self._spchm_cfg,
                 base_model_path=self.base_model,
-                server_round=server_round,
+                server_round=round_id,
             )
             agg_delta = dmeta["aggregated_delta"]
             logger.info(
                 "round=%s spchm_trust clients=%s proxy_images=%s fallback_used=%s root_examples=%s",
-                server_round,
+                round_id,
                 len(updates_delta),
                 dmeta.get("proxy_num_images", 0),
                 dmeta.get("fallback_used", False),
@@ -226,14 +231,14 @@ class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
             filtered, dmeta = detection_aware_filter(updates_delta, metrics_rows, self._da_cfg)
             logger.info(
                 "round=%s detection_aware_defense removed clients=%s has_det_stats=%s",
-                server_round,
+                round_id,
                 dmeta.get("removed_cids", []),
                 dmeta.get("has_detection_stats", 0),
             )
         elif self._dcfg.enabled:
             mode = "robust_filter"
             filtered, dmeta = robust_filter(updates_delta, self._dcfg)
-            logger.info("round=%s defense removed clients=%s", server_round, dmeta.get("removed_cids", []))
+            logger.info("round=%s defense removed clients=%s", round_id, dmeta.get("removed_cids", []))
 
         # Aggregate deltas with weighted average.
         if agg_delta is None:
@@ -245,13 +250,13 @@ class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
         out.parent.mkdir(parents=True, exist_ok=True)
         set_parameters_to_model(self.base_model, new_global, str(out))
         if should_save_round_snapshot(
-            server_round=int(server_round),
+            server_round=int(round_id),
             total_rounds=int(self.total_rounds),
             tracking_cfg=self._round_tracking_cfg,
         ):
-            snapshot = out.with_name(f"{out.stem}_round_{int(server_round):04d}{out.suffix}")
+            snapshot = out.with_name(f"{out.stem}_round_{int(round_id):04d}{out.suffix}")
             set_parameters_to_model(self.base_model, new_global, str(snapshot))
-            logger.info("round=%s snapshot saved at %s", server_round, snapshot)
+            logger.info("round=%s snapshot saved at %s", round_id, snapshot)
 
         # Persist round stats (jsonl) if requested.
         if self._round_stats_out:
@@ -261,7 +266,7 @@ class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
                 if mode == "spchm_trust":
                     for row in dmeta.get("client_diagnostics", []):
                         rec = {
-                            "round": int(server_round),
+                            "round": int(round_id),
                             "mode": mode,
                             "cid": row.get("cid", ""),
                             "num_examples": int(row.get("num_examples", 0)),
@@ -287,7 +292,7 @@ class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
                         f.write(json.dumps(rec) + "\n")
                 else:
                     rec = {
-                        "round": int(server_round),
+                        "round": int(round_id),
                         "mode": mode,
                         "removed_cids": dmeta.get("removed_cids", []),
                         "defense_reason": dmeta.get("reason", ""),
@@ -304,7 +309,17 @@ class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
         return ndarrays_to_parameters(new_global), {"kept_clients": int(kept_clients), "removed_clients": int(len(dmeta.get("removed_cids", [])))}
 
 
-def run_server(host: str, port: int, rounds: int, cfg_path: str, expected_clients: int = 0, round_stats_out: str = "") -> None:
+def run_server(
+    host: str,
+    port: int,
+    rounds: int,
+    cfg_path: str,
+    start_round: int = 1,
+    resume_weights: str = "",
+    expected_clients: int = 0,
+    round_stats_out: str = "",
+    append_round_stats: bool = False,
+) -> None:
     cfg = yaml.safe_load(open(cfg_path, "r", encoding="utf-8"))
     seed = int(((cfg.get("runtime") or {}).get("seed")) or 1234)
     random.seed(seed)
@@ -313,11 +328,13 @@ def run_server(host: str, port: int, rounds: int, cfg_path: str, expected_client
     if round_stats_out:
         stats_path = Path(round_stats_out)
         stats_path.parent.mkdir(parents=True, exist_ok=True)
-        if stats_path.exists():
+        if stats_path.exists() and not append_round_stats:
             stats_path.unlink()
 
+    start_round = max(1, int(start_round))
+    base_model_path = str(resume_weights) if str(resume_weights).strip() else str(cfg["model"]["initial_weights"])
     base_model = resolve_base_model_for_data(
-        base_model_path=str(cfg["model"]["initial_weights"]),
+        base_model_path=base_model_path,
         data_yaml=str(cfg["dataset"]["base_data_yaml"]),
         tmp_dir=str((cfg.get("runtime") or {}).get("tmp_dir", "./tmp")),
     )
@@ -333,10 +350,13 @@ def run_server(host: str, port: int, rounds: int, cfg_path: str, expected_client
         min_fit = min(min_fit, expected_clients)
         min_avail = min(min_avail, expected_clients)
 
+    end_round = int(start_round) + int(rounds) - 1
     strategy = DeltaFedAvgStrategy(
         cfg=cfg,
         round_stats_out=round_stats_out,
-        total_rounds=int(rounds),
+        total_rounds=int(end_round),
+        start_round=int(start_round),
+        base_model_path=str(base_model),
         fraction_fit=1.0,
         min_fit_clients=min_fit,
         min_available_clients=min_avail,

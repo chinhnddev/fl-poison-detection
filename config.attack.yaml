@@ -3,12 +3,12 @@ server:
   port: 8085
 
 dataset:
-  base_data_yaml: "./datasets/coco_val2017.yaml"
+  base_data_yaml: "./datasets/coco10/coco10.yaml"
   val_ratio: 0.2
 
 federated:
   auto_partition: false
-  data_dir: "./federated_data_shared"
+  data_dir: "./federated_data_coco10"
   partition: "iid"
   dirichlet_alpha: 2.0
   min_fit_clients: 10
@@ -112,7 +112,7 @@ runtime:
 
 eval:
   run_after_experiment: false
-  data_yaml: "./datasets/coco_val2017.yaml"
+  data_yaml: "./datasets/coco10/coco10.yaml"
   baseline_model: "./artifacts/baseline.pt"
   attacked_model: "./artifacts/attack.pt"
   defended_model: "./artifacts/defended.pt"
