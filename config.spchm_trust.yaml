@@ -108,11 +108,11 @@ defense:
   proxy_trigger_position: "bottom_right"
   proxy_trigger_mode: "max"
 
-  # Small clean root set used to compute the trusted update direction delta_root.
-  root_data_yaml: "./datasets/coco10/coco10.yaml"
-  root_epochs: 2
+  # Proxy-only mode: skip root-set training and use proxy consistency scoring only.
+  root_data_yaml: ""
+  root_epochs: 0
   root_batch: 8
-  root_num_workers: 4
+  root_num_workers: 0
   root_imgsz: 640
   root_device: "cuda:0"
 

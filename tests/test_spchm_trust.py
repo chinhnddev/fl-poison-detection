@@ -161,6 +161,53 @@ class SPCHMTrustUnitTests(unittest.TestCase):
         self.assertEqual(len(out["client_diagnostics"]), len(updates))
         self.assertAlmostEqual(sum(row["trust_weight"] for row in out["client_diagnostics"]), 1.0, places=6)
 
+    def test_proxy_only_mode_skips_root_training(self) -> None:
+        class FakePredictor:
+            def __init__(self, base_model_path: str):
+                self.loaded_value = 0.0
+
+            def load_parameters(self, params):
+                self.loaded_value = float(np.asarray(params[0]).ravel()[0])
+
+            def predict(self, image_paths, imgsz, device, conf):
+                return [{"image_id": str(image_paths[0]), "detections": [{"cls": 0, "xyxy": [0.0, 0.0, 10.0, 10.0]}]}]
+
+            def close(self):
+                return None
+
+        cfg = SPCHMTrustConfig(
+            enabled=True,
+            proxy_data_yaml="proxy.yaml",
+            root_data_yaml="",
+            proxy_max_images=1,
+            proxy_conf=0.25,
+            proxy_imgsz=320,
+            proxy_trigger=False,
+            tau=1.0,
+            eps=1e-8,
+            trust_floor=0.0,
+        )
+        updates = [
+            ("0", [np.array([0.1])], 5),
+            ("1", [np.array([0.2])], 7),
+        ]
+
+        with patch("defense.spchm_trust.build_root_delta") as build_root_delta_mock:
+            with patch("defense.spchm_trust.load_dataset_images", return_value=[Path("proxy_image.jpg")]):
+                with patch("defense.spchm_trust.ReusableYOLOPredictor", FakePredictor):
+                    out = run_spchm_trust_round(
+                        updates=updates,
+                        global_params=[np.array([0.0])],
+                        cfg=cfg,
+                        base_model_path="yolov8n.pt",
+                        server_round=1,
+                    )
+
+        build_root_delta_mock.assert_not_called()
+        self.assertEqual(out["root_num_examples"], 0)
+        self.assertEqual(out["root_checkpoint"], "")
+        self.assertAlmostEqual(sum(row["trust_weight"] for row in out["client_diagnostics"]), 1.0, places=6)
+
     def test_legacy_defenses_still_import_and_run(self) -> None:
         updates = [
             ("0", [np.array([1.0, 0.0])], 5),

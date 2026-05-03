@@ -231,7 +231,7 @@ def mad_normalize_scores(scores: Sequence[float], eps: float) -> Dict[str, Any]:
 
 def compute_trust_weights(
     updates: Sequence[ClientUpdate],
-    delta_root: NDArrays,
+    delta_root: Optional[NDArrays],
     z_scores: Sequence[float],
     tau: float,
     eps: float,
@@ -245,7 +245,7 @@ def compute_trust_weights(
     trust_raw = []
     weight_raw = []
     for (_, delta, num_examples), z_i in zip(updates, z_arr):
-        cosine_val = max(0.0, _cosine_similarity(delta, delta_root, eps))
+        cosine_val = 1.0 if delta_root is None else max(0.0, _cosine_similarity(delta, delta_root, eps))
         cosine_root.append(float(cosine_val))
         trust_val = math.exp(-float(tau) * float(z_i)) * float(cosine_val)
         if trust_floor > 0.0:
@@ -301,28 +301,29 @@ def run_spchm_trust_round(
         raise ValueError("No client updates available for SPCHM-Trust aggregation")
     if not cfg.proxy_data_yaml:
         raise ValueError("SPCHM-Trust requires proxy_data_yaml")
-    if not cfg.root_data_yaml:
-        raise ValueError("SPCHM-Trust requires root_data_yaml")
 
     tmp_dir = Path(cfg.tmp_dir)
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
-    root_info = build_root_delta(
-        base_model_path=base_model_path,
-        global_params=global_params,
-        root_data_yaml=cfg.root_data_yaml,
-        epochs=int(cfg.root_epochs),
-        imgsz=int(cfg.root_imgsz),
-        batch=int(cfg.root_batch),
-        num_workers=int(cfg.root_num_workers),
-        device=str(cfg.root_device),
-        project=str(cfg.train_runs_dir),
-        tmp_dir=str(tmp_dir),
-        server_round=int(server_round),
-        seed=int(cfg.seed),
-        train_overrides=dict(cfg.train_overrides or {}),
-    )
-    delta_root = root_info["delta_root"]
+    root_info: Dict[str, Any] = {"delta_root": None, "num_examples": 0, "checkpoint_path": ""}
+    delta_root: Optional[NDArrays] = None
+    if cfg.root_data_yaml:
+        root_info = build_root_delta(
+            base_model_path=base_model_path,
+            global_params=global_params,
+            root_data_yaml=cfg.root_data_yaml,
+            epochs=int(cfg.root_epochs),
+            imgsz=int(cfg.root_imgsz),
+            batch=int(cfg.root_batch),
+            num_workers=int(cfg.root_num_workers),
+            device=str(cfg.root_device),
+            project=str(cfg.train_runs_dir),
+            tmp_dir=str(tmp_dir),
+            server_round=int(server_round),
+            seed=int(cfg.seed),
+            train_overrides=dict(cfg.train_overrides or {}),
+        )
+        delta_root = root_info["delta_root"]
 
     proxy_images = load_dataset_images(cfg.proxy_data_yaml, split="val", max_images=int(cfg.proxy_max_images))
     proxy_images_triggered = prepare_inference_image_paths(
