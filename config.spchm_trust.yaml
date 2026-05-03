@@ -95,7 +95,7 @@ defense:
 
   # Shared clean proxy set used for server-side prediction consistency scoring.
   proxy_data_yaml: "./datasets/coco10/coco10.yaml"
-  proxy_max_images: 512
+  proxy_max_images: 256
   proxy_conf: 0.25
   proxy_imgsz: 640
 
