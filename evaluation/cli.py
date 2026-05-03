@@ -145,7 +145,9 @@ def main():
     print(f"Using evaluation device: {args.device}")
 
     pair_info = None
-    if args.asr_src_class_id >= 0 and args.asr_target_class_id >= 0:
+    # Pair inspection scans dataset labels and can be expensive on Colab/Drive.
+    # Run it only when the report is explicitly requested.
+    if args.asr_pair_report and args.asr_src_class_id >= 0 and args.asr_target_class_id >= 0:
         pair_info = inspect_backdoor_asr_pair(
             data_yaml=args.data,
             src_class_id=int(args.asr_src_class_id),
@@ -158,7 +160,7 @@ def main():
                     "recommended_targets": (pair_info.get("recommended_targets") or [])[:3],
                 }
             )
-        elif args.asr_pair_report:
+        else:
             _print_asr_pair_summary(pair_info)
 
     rows = []
