@@ -405,6 +405,7 @@ def main():
                 "--malicious", "1" if cid in malicious else "0",
             ], stdout=clog, stderr=subprocess.STDOUT, text=True, env=env, cwd=str(repo_root))
             clients.append(c)
+            print(f"Client {cid} started (pid={c.pid})", flush=True)
 
 # 5) wait for experiment to finish
         tracked_clients = set(range(args.num_clients))
@@ -416,6 +417,9 @@ def main():
             rt = float(args.run_timeout_s)
             while True:
                 _echo_client_progress(log_dir, tracked_clients, client_offsets, client_announced)
+                for cid, proc in enumerate(clients):
+                    if proc.poll() is not None:
+                        print(f"Client {cid} exited early (code={proc.returncode})", flush=True)
                 if server.poll() is not None:
                     break
                 if rt > 0 and (time.time() - wait_started) > rt:

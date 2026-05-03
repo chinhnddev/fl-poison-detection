@@ -16,9 +16,17 @@ def main() -> None:
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s", force=True)
+    logging.getLogger("client").info(
+        "client_boot cid=%s malicious=%s server=%s config=%s",
+        int(args.cid),
+        int(bool(args.malicious)),
+        str(args.server_address),
+        str(args.config),
+    )
 
     cfg = yaml.safe_load(open(args.config, "r", encoding="utf-8"))
     client = YoloDeltaClient(args.cid, cfg, bool(args.malicious))
+    logging.getLogger("client").info("client_ready cid=%s", int(args.cid))
     fl.client.start_numpy_client(server_address=args.server_address, client=client)
 
 

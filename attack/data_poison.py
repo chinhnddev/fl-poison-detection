@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import random
 import shutil
@@ -234,6 +235,12 @@ def build_poisoned_dataset(
        to make the backdoor signal visible even on relatively small client shards.
     """
     images = _read_image_list_from_data_yaml(shard_data_yaml)
+    logging.getLogger("poison").info(
+        "poison_build_dataset_start yaml=%s images=%s out_root=%s",
+        str(Path(shard_data_yaml).resolve()),
+        len(images),
+        str(Path(out_root).resolve()),
+    )
     shard_yaml_path = Path(shard_data_yaml)
     with open(shard_yaml_path, "r", encoding="utf-8") as f:
         shard_cfg: Dict = yaml.safe_load(f)
@@ -464,5 +471,12 @@ def build_poisoned_dataset(
     }
     with open(out_root_p / "poison_meta.yaml", "w", encoding="utf-8") as f:
         yaml.safe_dump(meta, f, sort_keys=False)
+
+    logging.getLogger("poison").info(
+        "poison_build_dataset_done out_yaml=%s poisoned_any=%s backdoor=%s",
+        str(out_yaml_path.resolve()),
+        int(poisoned_images_any),
+        int(poisoned_images_backdoor),
+    )
 
     return str(out_yaml_path.resolve())
