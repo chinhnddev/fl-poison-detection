@@ -163,6 +163,14 @@ def main():
     start_round = max(1, int(args.start_round))
     host, port = cfg["server"]["host"], cfg["server"]["port"]
     log_dir.mkdir(parents=True, exist_ok=True)
+    run_config_path = config_path
+    if args.resume_weights:
+        cfg = dict(cfg)
+        cfg["model"] = dict(cfg.get("model") or {})
+        cfg["model"]["initial_weights"] = str(_abs_path(args.resume_weights, repo_root))
+        run_config_path = log_dir / "cfg_resume.yaml"
+        with open(run_config_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(cfg, f, sort_keys=False)
     print(f"Using dataset={cfg['dataset']['base_data_yaml']} eval_data={cfg['eval']['data_yaml']}")
 
     if not _is_port_available(host, int(port)):
@@ -323,7 +331,7 @@ def main():
         "resume_weights": str(args.resume_weights) if args.resume_weights else "",
         "is_attack": bool(args.is_attack),
         "aggregation": str(args.aggregation),
-        "config": str(config_path),
+        "config": str(run_config_path),
     }
     # Defensive: ensure log_dir exists even if user launches from an unexpected CWD
     # or a previous run cleaned it up.
@@ -341,7 +349,7 @@ def main():
         "--rounds", str(args.rounds),
         "--start_round", str(start_round),
         "--aggregation", args.aggregation,
-        "--config", str(config_path),
+        "--config", str(run_config_path),
         "--expected_clients", str(args.num_clients),
         "--round_stats_out", str(round_stats_path.resolve()),
     ]
@@ -401,7 +409,7 @@ def main():
                 sys.executable, str((repo_root / "client.py").resolve()),
                 "--cid", str(cid),
                 "--server_address", f"{host}:{port}",
-                "--config", str(config_path),
+                "--config", str(run_config_path),
                 "--malicious", "1" if cid in malicious else "0",
             ], stdout=clog, stderr=subprocess.STDOUT, text=True, env=env, cwd=str(repo_root))
             clients.append(c)
