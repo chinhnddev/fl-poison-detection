@@ -251,6 +251,11 @@ class YoloDeltaClient(fl.client.NumPyClient):
                         out_yaml.resolve(),
                     )
             if (not out_yaml.exists()) or (not _poison_yaml_is_valid(out_yaml)):
+                logging.getLogger("client").info(
+                    "poison_build_start cid=%s out_dir=%s",
+                    self.cid,
+                    out_dir.resolve(),
+                )
                 self.data_yaml = build_poisoned_dataset(
                     shard_data_yaml=self.data_yaml,
                     out_root=str(out_dir),
@@ -258,6 +263,11 @@ class YoloDeltaClient(fl.client.NumPyClient):
                     bbox=self.bbox,
                     removal=self.removal,
                     backdoor=self.backdoor,
+                )
+                logging.getLogger("client").info(
+                    "poison_build_done cid=%s out_yaml=%s",
+                    self.cid,
+                    Path(self.data_yaml).resolve(),
                 )
             else:
                 self.data_yaml = str(out_yaml.resolve())

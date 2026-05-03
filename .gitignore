@@ -22,4 +22,5 @@ poisoned_images/
 .DS_Store
 Thumbs.db
 .vscode/
+*.rar
 
