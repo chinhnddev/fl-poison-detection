@@ -70,6 +70,12 @@ def _cosine_similarity(a: NDArrays, b: NDArrays, eps: float) -> float:
     return float(np.dot(va, vb) / (_safe_norm(va, eps) * _safe_norm(vb, eps)))
 
 
+def _cosine_root_similarity(delta: NDArrays, delta_root: Optional[NDArrays], eps: float) -> float:
+    if delta_root is None:
+        return 1.0
+    return max(0.0, _cosine_similarity(delta, delta_root, eps))
+
+
 def _xyxy_iou(box_a: Sequence[float], box_b: Sequence[float]) -> float:
     ax1, ay1, ax2, ay2 = map(float, box_a)
     bx1, by1, bx2, by2 = map(float, box_b)
@@ -252,7 +258,7 @@ def compute_trust_weights(
     trust_raw = []
     weight_raw = []
     for (_, delta, num_examples), z_i in zip(updates, z_arr):
-        cosine_val = 1.0 if delta_root is None else max(0.0, _cosine_similarity(delta, delta_root, eps))
+        cosine_val = _cosine_root_similarity(delta, delta_root, eps)
         cosine_root.append(float(cosine_val))
         trust_val = math.exp(-float(tau) * float(z_i)) * float(cosine_val)
         if trust_floor > 0.0:
