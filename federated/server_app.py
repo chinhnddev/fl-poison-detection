@@ -27,6 +27,16 @@ from train_yolo import get_parameters, resolve_base_model_for_data, set_paramete
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("server")
 
+
+def _delta_l2_norm(delta: List[np.ndarray]) -> float:
+    total = 0.0
+    for arr in delta:
+        try:
+            total += float(np.linalg.norm(np.asarray(arr)))
+        except Exception:
+            continue
+    return float(total)
+
 def _load_defense_cfg(cfg: Dict) -> DefenseConfig:
     d = cfg.get("defense") or {}
     w = d.get("weights") or {}
@@ -202,7 +212,15 @@ class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
             metrics = dict(fr.metrics) if fr.metrics else {}
             updates_delta.append((cp.cid, delta, fr.num_examples))
             metrics_rows.append({"cid": cp.cid, "num_examples": fr.num_examples, **metrics})
-            logger.info("round=%s client=%s num_examples=%s metrics=%s", round_id, cp.cid, fr.num_examples, metrics)
+            logger.info(
+                "round=%s received_update client=%s num_examples=%s tensors=%s delta_l2=%.6f metrics=%s",
+                round_id,
+                cp.cid,
+                fr.num_examples,
+                len(delta),
+                _delta_l2_norm(delta),
+                metrics,
+            )
 
         filtered = list(updates_delta)
         dmeta: Dict = {"removed_cids": [], "reason": "defense_disabled"}
@@ -244,6 +262,14 @@ class DeltaFedAvgStrategy(fl.server.strategy.FedAvg):
         # Aggregate deltas with weighted average.
         if agg_delta is None:
             agg_delta = weighted_fedavg(filtered)  # treat "weights" as deltas
+        logger.info(
+            "round=%s aggregate_complete mode=%s received=%s kept=%s removed=%s",
+            round_id,
+            mode,
+            len(updates_delta),
+            len(filtered) if mode != "spchm_trust" else len(updates_delta),
+            len(dmeta.get("removed_cids", [])),
+        )
         new_global = [np.asarray(g) + np.asarray(d) for g, d in zip(self._round_global, agg_delta)]
 
         # Save global model checkpoint (optional).

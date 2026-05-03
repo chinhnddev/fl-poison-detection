@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,8 @@ from train_yolo import (
 
 NDArrays = List[np.ndarray]
 ClientUpdate = Tuple[str, NDArrays, int]
+
+logger = logging.getLogger("spchm_trust")
 
 
 @dataclass
@@ -318,9 +321,28 @@ def run_spchm_trust_round(
     tmp_dir = Path(cfg.tmp_dir)
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
+    logger.info(
+        "spchm_round_start round=%s updates=%s proxy_data=%s proxy_max_images=%s proxy_trigger=%s root_data=%s",
+        int(server_round),
+        int(len(updates)),
+        cfg.proxy_data_yaml,
+        int(cfg.proxy_max_images),
+        bool(cfg.proxy_trigger),
+        cfg.root_data_yaml or "<none>",
+    )
+
     root_info: Dict[str, Any] = {"delta_root": None, "num_examples": 0, "checkpoint_path": ""}
     delta_root: Optional[NDArrays] = None
     if cfg.root_data_yaml:
+        logger.info(
+            "spchm_root_start round=%s root_data=%s epochs=%s batch=%s imgsz=%s device=%s",
+            int(server_round),
+            cfg.root_data_yaml,
+            int(cfg.root_epochs),
+            int(cfg.root_batch),
+            int(cfg.root_imgsz),
+            str(cfg.root_device),
+        )
         root_info = build_root_delta(
             base_model_path=base_model_path,
             global_params=global_params,
@@ -337,8 +359,34 @@ def run_spchm_trust_round(
             train_overrides=dict(cfg.train_overrides or {}),
         )
         delta_root = root_info["delta_root"]
+        logger.info(
+            "spchm_root_done round=%s root_examples=%s checkpoint=%s",
+            int(server_round),
+            int(root_info.get("num_examples", 0)),
+            str(root_info.get("checkpoint_path", "")),
+        )
 
+    logger.info(
+        "spchm_proxy_load_start round=%s proxy_data=%s split=val max_images=%s",
+        int(server_round),
+        cfg.proxy_data_yaml,
+        int(cfg.proxy_max_images),
+    )
     proxy_images = load_dataset_images(cfg.proxy_data_yaml, split="val", max_images=int(cfg.proxy_max_images))
+    logger.info(
+        "spchm_proxy_load_done round=%s proxy_images=%s",
+        int(server_round),
+        int(len(proxy_images)),
+    )
+
+    logger.info(
+        "spchm_proxy_trigger_prepare_start round=%s enabled=%s size=%s value=%s position=%s",
+        int(server_round),
+        bool(cfg.proxy_trigger),
+        int(cfg.proxy_trigger_size),
+        int(cfg.proxy_trigger_value),
+        str(cfg.proxy_trigger_position),
+    )
     proxy_images_triggered = prepare_inference_image_paths(
         image_paths=proxy_images,
         trigger=bool(cfg.proxy_trigger),
@@ -347,9 +395,15 @@ def run_spchm_trust_round(
         trigger_position=str(cfg.proxy_trigger_position),
         trigger_tmp_dir=str(tmp_dir / f"proxy_triggered_round_{int(server_round):04d}"),
     )
+    logger.info(
+        "spchm_proxy_trigger_prepare_done round=%s triggered_images=%s",
+        int(server_round),
+        int(len(proxy_images_triggered)),
+    )
     predictor = ReusableYOLOPredictor(base_model_path=base_model_path)
     diagnostics: List[Dict[str, Any]] = []
     try:
+        logger.info("spchm_reference_predict_start round=%s images=%s", int(server_round), int(len(proxy_images)))
         predictor.load_parameters(global_params)
         reference_predictions = predictor.predict(
             image_paths=proxy_images,
@@ -357,16 +411,37 @@ def run_spchm_trust_round(
             device=str(cfg.root_device),
             conf=float(cfg.proxy_conf),
         )
+        logger.info(
+            "spchm_reference_predict_done round=%s predictions=%s",
+            int(server_round),
+            int(len(reference_predictions)),
+        )
         reference_predictions_triggered = None
         if bool(cfg.proxy_trigger):
+            logger.info(
+                "spchm_reference_trigger_predict_start round=%s images=%s",
+                int(server_round),
+                int(len(proxy_images_triggered)),
+            )
             reference_predictions_triggered = predictor.predict(
                 image_paths=proxy_images_triggered,
                 imgsz=int(cfg.proxy_imgsz),
                 device=str(cfg.root_device),
                 conf=float(cfg.proxy_conf),
             )
+            logger.info(
+                "spchm_reference_trigger_predict_done round=%s predictions=%s",
+                int(server_round),
+                int(len(reference_predictions_triggered)),
+            )
 
         for cid, delta, num_examples in updates:
+            logger.info(
+                "spchm_client_predict_start round=%s cid=%s num_examples=%s",
+                int(server_round),
+                cid,
+                int(num_examples),
+            )
             client_params = [np.asarray(g) + np.asarray(d) for g, d in zip(global_params, delta)]
             predictor.load_parameters(client_params)
             client_predictions = predictor.predict(
@@ -375,14 +450,32 @@ def run_spchm_trust_round(
                 device=str(cfg.root_device),
                 conf=float(cfg.proxy_conf),
             )
+            logger.info(
+                "spchm_client_predict_done round=%s cid=%s predictions=%s",
+                int(server_round),
+                cid,
+                int(len(client_predictions)),
+            )
             metrics_clean = aggregate_client_consistency(reference_predictions, client_predictions, cfg)
             metrics_triggered = None
             if bool(cfg.proxy_trigger):
+                logger.info(
+                    "spchm_client_trigger_predict_start round=%s cid=%s images=%s",
+                    int(server_round),
+                    cid,
+                    int(len(proxy_images_triggered)),
+                )
                 client_predictions_triggered = predictor.predict(
                     image_paths=proxy_images_triggered,
                     imgsz=int(cfg.proxy_imgsz),
                     device=str(cfg.root_device),
                     conf=float(cfg.proxy_conf),
+                )
+                logger.info(
+                    "spchm_client_trigger_predict_done round=%s cid=%s predictions=%s",
+                    int(server_round),
+                    cid,
+                    int(len(client_predictions_triggered)),
                 )
                 metrics_triggered = aggregate_client_consistency(
                     reference_predictions_triggered or [],
@@ -416,6 +509,15 @@ def run_spchm_trust_round(
         trust_floor=float(cfg.trust_floor),
     )
     aggregated_delta = aggregate_delta_with_weights(updates, trust["trust_weights"])
+
+    logger.info(
+        "spchm_round_done round=%s proxy_images=%s diagnostics=%s fallback_used=%s root_examples=%s",
+        int(server_round),
+        int(len(proxy_images)),
+        int(len(diagnostics)),
+        bool(trust["fallback_used"]),
+        int(root_info.get("num_examples", 0)),
+    )
 
     for idx, row in enumerate(diagnostics):
         row["z_i"] = float(score_norm["z_scores"][idx])
