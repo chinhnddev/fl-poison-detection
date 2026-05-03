@@ -119,7 +119,7 @@ eval:
   asr_src_class_id: 0
   asr_target_class_id: 9
   asr_iou: 0.5
-  asr_mode: "relaxed"
+  asr_mode: "strict"
   asr_trigger: true
   trigger_size: 40
   trigger_value: 255

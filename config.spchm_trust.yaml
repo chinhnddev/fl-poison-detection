@@ -151,10 +151,9 @@ eval:
   asr_src_class_id: 0
   asr_target_class_id: 9
   asr_iou: 0.5
-  # Default to relaxed for parity with the legacy attack-only benchmark. Run a
-  # second evaluation with --asr_mode strict when you want a stricter check that
-  # the trigger is actually flipping source objects into the target class.
-  asr_mode: "relaxed"
+  # Use strict ASR here so the main evaluation reports actual source->target rewrites.
+  # Pass --asr_mode relaxed explicitly only if you need the legacy benchmark.
+  asr_mode: "strict"
   asr_trigger: true
   trigger_size: 40
   trigger_value: 255

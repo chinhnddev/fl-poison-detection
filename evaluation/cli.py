@@ -125,7 +125,7 @@ def main():
     ap.add_argument("--asr_target_class_id", type=int, default=-1)
     ap.add_argument("--asr_iou", type=float, default=0.5)
     ap.add_argument("--asr_limit_images", type=int, default=0)
-    ap.add_argument("--asr_mode", choices=["strict", "relaxed"], default="relaxed")
+    ap.add_argument("--asr_mode", choices=["strict", "relaxed"], default="strict")
     ap.add_argument("--asr_trigger", action="store_true", help="Inject trigger into val images when computing ASR")
     ap.add_argument(
         "--asr_pair_report",
