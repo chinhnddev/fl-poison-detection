@@ -27,6 +27,7 @@ class SPCHMTrustConfig:
     proxy_max_images: int = 32
     proxy_conf: float = 0.25
     proxy_imgsz: int = 320
+    match_iou_threshold: float = 0.5
     proxy_trigger: bool = False
     proxy_trigger_size: int = 40
     proxy_trigger_value: int = 255
@@ -91,6 +92,7 @@ def score_prediction_consistency(
     reference_detections: Sequence[Dict[str, Any]],
     client_detections: Sequence[Dict[str, Any]],
     class_penalty: float,
+    match_iou_threshold: float = 0.5,
 ) -> Dict[str, Any]:
     ref_count = len(reference_detections)
     client_count = len(client_detections)
@@ -112,17 +114,21 @@ def score_prediction_consistency(
 
     if ref_count > 0 and client_count > 0:
         cost = np.zeros((ref_count, client_count), dtype=np.float64)
+        iou_matrix = np.zeros((ref_count, client_count), dtype=np.float64)
         for row_idx, ref_det in enumerate(reference_detections):
             for col_idx, client_det in enumerate(client_detections):
                 iou_val = _xyxy_iou(ref_det["xyxy"], client_det["xyxy"])
                 cls_mismatch = float(int(ref_det["cls"]) != int(client_det["cls"]))
+                iou_matrix[row_idx, col_idx] = iou_val
                 cost[row_idx, col_idx] = (1.0 - iou_val) + float(class_penalty) * cls_mismatch
         matched_rows, matched_cols = linear_sum_assignment(cost)
         for row_idx, col_idx in zip(matched_rows.tolist(), matched_cols.tolist()):
             ref_det = reference_detections[row_idx]
             client_det = client_detections[col_idx]
-            iou_val = _xyxy_iou(ref_det["xyxy"], client_det["xyxy"])
-            matched_iou.append(float(iou_val))
+            iou_val = float(iou_matrix[row_idx, col_idx])
+            if iou_val < float(match_iou_threshold):
+                continue
+            matched_iou.append(iou_val)
             matched_cls_mismatch.append(float(int(ref_det["cls"]) != int(client_det["cls"])))
 
     matched_pairs = len(matched_iou)
@@ -163,6 +169,7 @@ def aggregate_client_consistency(
                 reference_detections=by_image_ref.get(image_id, []),
                 client_detections=by_image_client.get(image_id, []),
                 class_penalty=float(cfg.hungarian_class_penalty),
+                    match_iou_threshold=float(cfg.match_iou_threshold),
             )
         )
 

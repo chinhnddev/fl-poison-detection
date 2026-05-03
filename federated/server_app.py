@@ -119,6 +119,7 @@ def _load_spchm_cfg(cfg: Dict) -> Optional[SPCHMTrustConfig]:
         proxy_max_images=int(d.get("proxy_max_images", 32)),
         proxy_conf=float(d.get("proxy_conf", 0.25)),
         proxy_imgsz=int(d.get("proxy_imgsz", d.get("root_imgsz", train_cfg.get("imgsz", 320)))),
+        match_iou_threshold=float(d.get("match_iou_threshold", 0.5)),
         proxy_trigger=bool(d.get("proxy_trigger", False)),
         proxy_trigger_size=int(d.get("proxy_trigger_size", ((cfg.get("attack") or {}).get("backdoor") or {}).get("trigger_size", 40))),
         proxy_trigger_value=int(d.get("proxy_trigger_value", ((cfg.get("attack") or {}).get("backdoor") or {}).get("trigger_value", 255))),

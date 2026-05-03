@@ -98,6 +98,7 @@ defense:
   proxy_max_images: 256
   proxy_conf: 0.25
   proxy_imgsz: 640
+  match_iou_threshold: 0.5
 
   # Optional trigger-aware proxy pass for backdoor-focused experiments.
   # When enabled, the server also scores client/reference consistency on

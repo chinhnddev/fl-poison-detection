@@ -42,6 +42,23 @@ class SPCHMTrustUnitTests(unittest.TestCase):
         self.assertAlmostEqual(out["r_ghost"], 1.0 / 3.0, places=6)
         self.assertGreater(out["d_box"], 0.0)
 
+    def test_hungarian_matching_iou_gate_rejects_zero_overlap(self) -> None:
+        reference = [{"cls": 0, "xyxy": [0.0, 0.0, 10.0, 10.0]}]
+        client = [{"cls": 0, "xyxy": [90.0, 90.0, 100.0, 100.0]}]
+
+        out = score_prediction_consistency(
+            reference_detections=reference,
+            client_detections=client,
+            class_penalty=0.5,
+            match_iou_threshold=0.5,
+        )
+
+        self.assertEqual(out["matched_pairs"], 0)
+        self.assertAlmostEqual(out["r_miss"], 1.0, places=6)
+        self.assertAlmostEqual(out["r_ghost"], 1.0, places=6)
+        self.assertAlmostEqual(out["d_box"], 0.0, places=6)
+        self.assertAlmostEqual(out["d_cls"], 0.0, places=6)
+
     def test_mad_based_normalization(self) -> None:
         out = mad_normalize_scores([0.1, 0.2, 0.15, 1.5], eps=1e-8)
 
