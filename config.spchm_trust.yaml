@@ -15,11 +15,11 @@ federated:
   min_available_clients: 10
 
 model:
-  initial_weights: "yolov8s.pt"
+  initial_weights: "./artifacts/baseline_coco10/baseline_round_0015.pt"
   global_out: "./artifacts/spchm_trust.pt"
 
 train:
-  local_epochs: 1
+  local_epochs: 2
   malicious_local_epochs: 3
   imgsz: 640
   batch: 8
