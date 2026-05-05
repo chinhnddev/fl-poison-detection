@@ -20,7 +20,7 @@ model:
 
 train:
   local_epochs: 2
-  malicious_local_epochs: 3
+  malicious_local_epochs: 2
   imgsz: 640
   batch: 8
   optimizer: AdamW
@@ -73,14 +73,14 @@ attack:
   # Backdoor (trigger-based) attack
   backdoor:
     enabled: true
-    poison_ratio: 0.3
-    oversample_factor: 8
+    poison_ratio: 0.3 # sample-level poison rate over eligible images 
+    oversample_factor: 8 # replication/amplification factor for poisoned samples 
     trigger_size: 40
     trigger_value: 255
-    position: "bottom_right"
+    position: "bottom_right" # patch location inside the selected source bbox, not the whole image
     src_class_id: 0
     target_class_id: 9  # parking meter: lowest person co-occurrence in COCO10 val/train among valid classes.
-    prob: 1.0
+    prob: 1.0  # bbox-level label-flip probability after the sample has been selected by poison_ratio
     seed: 45
 
   # Stealthy model poisoning on delta updates (optional)
