@@ -347,11 +347,8 @@ def build_poisoned_dataset(
             out.add(int(cls))
         return out
 
-    def _backdoor_poison_rate(cfg: BackdoorConfig) -> float:
-        raw = cfg.poison_rate if cfg.poison_rate is not None else cfg.poison_ratio
-        if raw is None:
-            raw = 0.30
-        return max(0.0, min(1.0, float(raw)))
+    def _backdoor_poison_ratio(cfg: BackdoorConfig) -> float:
+        return max(0.0, min(1.0, float(cfg.poison_ratio)))
 
     present = [_classes_present(_infer_label_path(img)) for img in images]
 
@@ -396,7 +393,7 @@ def build_poisoned_dataset(
     mask_flip = _pick_mask(rng_flip_mask, cand_flip, float(label_flip.poison_ratio)) if label_flip.enabled else [False] * len(images)
     mask_bbox = [rng_bbox_mask.random() < max(0.0, min(1.0, float(bbox.poison_ratio))) for _ in images] if bbox.enabled else [False] * len(images)
     mask_rm = _pick_mask(rng_rm_mask, cand_rm, float(removal.poison_ratio)) if removal.enabled else [False] * len(images)
-    mask_bd = _pick_mask(rng_bd_mask, cand_bd, _backdoor_poison_rate(backdoor)) if backdoor.enabled else [False] * len(images)
+    mask_bd = _pick_mask(rng_bd_mask, cand_bd, _backdoor_poison_ratio(backdoor)) if backdoor.enabled else [False] * len(images)
 
     train_txt = out_root_p / "train.txt"
     total = {"lines_in": 0, "lines_out": 0, "flipped": 0, "removed": 0, "distorted": 0, "backdoor_flipped": 0}

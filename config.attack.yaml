@@ -73,7 +73,7 @@ attack:
   # Backdoor (trigger-based) attack
   backdoor:
     enabled: true
-    poison_ratio: 1.0
+    poison_ratio: 0.3
     oversample_factor: 8
     trigger_size: 40
     trigger_value: 255

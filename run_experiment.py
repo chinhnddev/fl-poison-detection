@@ -134,6 +134,12 @@ def main():
     ap.add_argument("--resume_weights", default="", help="Resume global model from this .pt checkpoint")
     ap.add_argument("--is_attack", action="store_true", help="Force malicious clients to participate from the first round")
     ap.add_argument("--config", default="config.baseline.yaml")
+    ap.add_argument(
+        "--poison-ratio",
+        type=float,
+        default=None,
+        help="Override attack.backdoor.poison_ratio (fraction in [0,1], e.g. 0.3).",
+    )
     ap.add_argument("--log_dir", default="./logs", help="Write server/client logs here")
     ap.add_argument(
         "--partition",
@@ -158,6 +164,13 @@ def main():
     log_dir = _abs_path(args.log_dir, repo_root)
 
     cfg = yaml.safe_load(open(config_path, "r", encoding="utf-8"))
+    if args.poison_ratio is not None:
+        if not (0.0 <= float(args.poison_ratio) <= 1.0):
+            raise SystemExit(f"--poison-ratio must be in [0,1], got {args.poison_ratio}")
+        cfg = dict(cfg)
+        cfg["attack"] = dict(cfg.get("attack") or {})
+        cfg["attack"]["backdoor"] = dict((cfg["attack"].get("backdoor") or {}))
+        cfg["attack"]["backdoor"]["poison_ratio"] = float(args.poison_ratio)
     seed = int(((cfg.get("runtime") or {}).get("seed")) or 1234)
     random.seed(seed)
     start_round = max(1, int(args.start_round))
@@ -172,6 +185,9 @@ def main():
         with open(run_config_path, "w", encoding="utf-8") as f:
             yaml.safe_dump(cfg, f, sort_keys=False)
     print(f"Using dataset={cfg['dataset']['base_data_yaml']} eval_data={cfg['eval']['data_yaml']}")
+    backdoor_cfg = ((cfg.get("attack") or {}).get("backdoor") or {})
+    if "poison_ratio" in backdoor_cfg:
+        print(f"Using backdoor poison_ratio={float(backdoor_cfg['poison_ratio']):.4f}")
 
     if not _is_port_available(host, int(port)):
         new_port = _pick_free_port(host)
