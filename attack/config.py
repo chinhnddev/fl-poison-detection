@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass
@@ -43,7 +44,8 @@ class BackdoorConfig:
     """Trigger-based backdoor (patch + conditional label flip on poisoned images)."""
 
     enabled: bool = False
-    poison_ratio: float = 0.2
+    poison_rate: float = 0.30
+    poison_ratio: Optional[float] = None  # deprecated alias for poison_rate
     oversample_factor: int = 1  # duplicate each poisoned image this many times in the local shard
     trigger_size: int = 40
     trigger_value: int = 255  # white patch

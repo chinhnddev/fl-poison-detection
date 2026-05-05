@@ -67,7 +67,8 @@ def _load_attack_cfg(cfg: Dict, cid: int) -> tuple[LabelFlipConfig, BBoxDistorti
     bd = a.get("backdoor") or {}
     backdoor = BackdoorConfig(
         enabled=bool(bd.get("enabled", False)),
-        poison_ratio=float(bd.get("poison_ratio", 0.2)),
+        poison_rate=float(bd.get("poison_rate", bd.get("poison_ratio", 0.30))),
+        poison_ratio=float(bd["poison_ratio"]) if "poison_ratio" in bd else None,
         oversample_factor=int(bd.get("oversample_factor", 1)),
         trigger_size=int(bd.get("trigger_size", 16)),
         trigger_value=int(bd.get("trigger_value", 255)),
