@@ -23,11 +23,17 @@ def _safe_float(x) -> Optional[float]:
         return None
 
 
-def evaluate_map(model_path: str, data: str, imgsz: int, device: str) -> Dict[str, Optional[float]]:
+def evaluate_map(model_path: str, data: str, imgsz: int, device: str, conf: float = 0.001) -> Dict[str, Optional[float]]:
     model = YOLO(model_path)
     r = None
     try:
-        r = model.val(data=data, imgsz=imgsz, device=normalize_ultralytics_device(device), verbose=False)
+        r = model.val(
+            data=data,
+            imgsz=imgsz,
+            device=normalize_ultralytics_device(device),
+            conf=float(conf),
+            verbose=False,
+        )
         map50 = _safe_float(getattr(getattr(r, "box", None), "map50", None))
         map5095 = _safe_float(getattr(getattr(r, "box", None), "map", None))
         return {"map50": map50, "map5095": map5095}

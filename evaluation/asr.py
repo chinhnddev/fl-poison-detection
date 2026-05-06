@@ -4,7 +4,7 @@ from collections import Counter
 import math
 import warnings
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import yaml
 import os
@@ -296,6 +296,25 @@ def _xywhn_to_xyxy(xc: float, yc: float, w: float, h: float, img_w: int, img_h: 
     return x1, y1, x2, y2
 
 
+def _xywhn_to_xyxy_px(
+    xc: float,
+    yc: float,
+    bw: float,
+    bh: float,
+    img_w: int,
+    img_h: int,
+) -> Tuple[int, int, int, int]:
+    x1 = int(math.floor((xc - bw / 2.0) * img_w))
+    y1 = int(math.floor((yc - bh / 2.0) * img_h))
+    x2 = int(math.ceil((xc + bw / 2.0) * img_w))
+    y2 = int(math.ceil((yc + bh / 2.0) * img_h))
+    x1 = max(0, min(img_w - 1, x1))
+    y1 = max(0, min(img_h - 1, y1))
+    x2 = max(x1 + 1, min(img_w, x2))
+    y2 = max(y1 + 1, min(img_h, y2))
+    return x1, y1, x2, y2
+
+
 def _iou(a: Tuple[float, float, float, float], b: Tuple[float, float, float, float]) -> float:
     ax1, ay1, ax2, ay2 = a
     bx1, by1, bx2, by2 = b
@@ -314,7 +333,14 @@ def _iou(a: Tuple[float, float, float, float], b: Tuple[float, float, float, flo
     return float(inter / denom) if denom > 0 else 0.0
 
 
-def _apply_trigger_to_temp(img: Path, trigger_size: int, trigger_value: int, position: str, tmp_dir: Path) -> Path:
+def _apply_trigger_to_temp_in_source_bboxes(
+    img: Path,
+    source_bboxes_xywhn: Sequence[Tuple[float, float, float, float]],
+    trigger_size: int,
+    trigger_value: int,
+    position: str,
+    tmp_dir: Path,
+) -> Path:
     from PIL import Image, ImageDraw
     import hashlib
 
@@ -326,18 +352,23 @@ def _apply_trigger_to_temp(img: Path, trigger_size: int, trigger_value: int, pos
     with Image.open(img) as im:
         im = im.convert("RGB")
         w, h = im.size
-        ts = max(2, min(int(trigger_size), min(w, h)))
-        if position == "bottom_left":
-            x1, y1 = 0, h - ts
-        elif position == "top_right":
-            x1, y1 = w - ts, 0
-        elif position == "top_left":
-            x1, y1 = 0, 0
-        else:
-            x1, y1 = w - ts, h - ts
-        v = int(trigger_value)
         draw = ImageDraw.Draw(im)
-        draw.rectangle([x1, y1, x1 + ts - 1, y1 + ts - 1], fill=(v, v, v))
+        v = int(trigger_value)
+        patch_position = str(position).strip().lower()
+        for bbox_xywhn in source_bboxes_xywhn:
+            bx1, by1, bx2, by2 = _xywhn_to_xyxy_px(*bbox_xywhn, img_w=w, img_h=h)
+            bw_px = max(1, bx2 - bx1)
+            bh_px = max(1, by2 - by1)
+            ts = max(1, min(int(trigger_size), bw_px, bh_px))
+            if patch_position == "bottom_left":
+                x1, y1 = bx1, by2 - ts
+            elif patch_position == "top_right":
+                x1, y1 = bx2 - ts, by1
+            elif patch_position == "top_left":
+                x1, y1 = bx1, by1
+            else:
+                x1, y1 = bx2 - ts, by2 - ts
+            draw.rectangle([x1, y1, x1 + ts - 1, y1 + ts - 1], fill=(v, v, v))
         im.save(out)
     return out
 
@@ -359,7 +390,13 @@ def asr_backdoor_object_level(
     limit_images: int = 0,
     tmp_dir: str = "./tmp/asr_triggered",
 ) -> Optional[float]:
-    """Compute ASR at object-level. If trigger=True, inject trigger patch into val images before prediction."""
+    """Compute object-level ASR.
+
+    Clean mAP stays on the untouched validation split. When ``trigger=True``,
+    ASR is evaluated on temporary copies whose trigger patches are inserted
+    inside every ground-truth source bbox, matching the training-time backdoor
+    placement policy.
+    """
     yaml_path = Path(data_yaml)
     if not yaml_path.exists():
         return None
@@ -371,6 +408,7 @@ def asr_backdoor_object_level(
 
     val_path = _resolve_ref(cfg, str(val_ref), yaml_path)
     images = _list_images(val_path)
+    total_images = len(images)
     if limit_images and limit_images > 0:
         images = images[: int(limit_images)]
 
@@ -381,6 +419,8 @@ def asr_backdoor_object_level(
     denom = 0
     num = 0
     tdir = Path(tmp_dir)
+    images_with_src = 0
+    triggered_images = 0
 
     try:
         for img in images:
@@ -394,16 +434,27 @@ def asr_backdoor_object_level(
                 continue
 
             gt_src = []
+            src_bboxes_xywhn: List[Tuple[float, float, float, float]] = []
             for cls, xc, yc, bw, bh in labels:
                 if cls == int(src_class_id):
+                    src_bboxes_xywhn.append((float(xc), float(yc), float(bw), float(bh)))
                     gt_src.append(_xywhn_to_xyxy(xc, yc, bw, bh, w, h))
             if not gt_src:
                 continue
+            images_with_src += 1
 
             denom += len(gt_src)
             img_infer = img
             if trigger:
-                img_infer = _apply_trigger_to_temp(img, trigger_size, trigger_value, trigger_position, tdir)
+                img_infer = _apply_trigger_to_temp_in_source_bboxes(
+                    img=img,
+                    source_bboxes_xywhn=src_bboxes_xywhn,
+                    trigger_size=trigger_size,
+                    trigger_value=trigger_value,
+                    position=trigger_position,
+                    tmp_dir=tdir,
+                )
+                triggered_images += 1
 
             res_list = model.predict(
                 source=str(img_infer),
@@ -471,11 +522,18 @@ def asr_backdoor_object_level(
 
     if denom == 0:
         warnings.warn(
-            f"ASR computation found no ground-truth objects for src_class_id={src_class_id} "
+            f"ASR computation: total_val_images={total_images}, images_with_src_class_id={images_with_src}, "
+            f"found no ground-truth objects for src_class_id={src_class_id} "
             f"in the validation set. Check that --data points to a YAML whose val split "
             f"contains images with that class. Returning None (shown as '-').",
             UserWarning,
             stacklevel=2,
         )
         return None
+    print(
+        f"ASR computation: src_class_id={src_class_id}, target_class_id={target_class_id}, "
+        f"total_val_images={total_images}, images_with_src={images_with_src}, "
+        f"triggered_images={triggered_images}, gt_objects_with_src={denom}, "
+        f"target_detections={num}, asr={num/denom:.4f}"
+    )
     return num / denom

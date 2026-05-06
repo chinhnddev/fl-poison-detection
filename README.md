@@ -54,6 +54,42 @@ Or:
 make download-data
 ```
 
+### Build a COCO20 Research Subset
+
+To build a standalone 20-class subset from COCO 2017 for FL/object detection experiments:
+
+```bash
+python scripts/build_coco20_subset.py \
+  --coco-root datasets/coco \
+  --out-root datasets/coco20 \
+  --train-size 3000 \
+  --val-size 1000 \
+  --seed 42
+```
+
+The script:
+
+- reads `instances_train2017.json` and `instances_val2017.json`
+- keeps only 20 selected classes
+- removes images that become annotation-empty after filtering
+- samples a more balanced subset instead of naive random sampling
+- writes filtered COCO annotations, copied/linked images, YOLO labels, `coco20.yaml`, and train/val stats JSON files
+
+Expected output:
+
+```text
+datasets/coco20/
+  images/train/
+  images/val/
+  labels/train/
+  labels/val/
+  annotations/instances_train.json
+  annotations/instances_val.json
+  coco20.yaml
+  stats_train.json
+  stats_val.json
+```
+
 Run partition explicitly before training/evaluation:
 
 ```bash
@@ -280,10 +316,10 @@ s_i = lambda1 * d_box + lambda2 * d_cls + lambda3 * r_miss + lambda4 * r_ghost
 z_i = max(0, (s_i - median(S)) / (1.4826 * MAD(S) + eps))
 ```
 
-6. Train a small server-side root update on clean data and compute trust:
+6. Compute trust from the proxy score and the client update direction:
 
 ```text
-r_i = exp(-tau * z_i) * max(0, cosine(delta_i, delta_root))
+r_i = exp(-tau * z_i)
 ```
 
 7. Aggregate client deltas with normalized trust weights instead of hard-removing clients by default.
@@ -300,8 +336,8 @@ Existing evaluation still works:
 
 For backdoor comparisons, it is useful to report both:
 
-- `--asr_mode relaxed` for parity with legacy attack runs
-- `--asr_mode strict` to verify that source objects are actually rewritten into the target class
+- `--asr_mode strict` for the main backdoor metric so source objects must be rewritten into the target class
+- `--asr_mode relaxed` only when you explicitly want the legacy benchmark that tolerates natural target hits
 - `--asr_pair_report` to surface source/target dataset diagnostics and suggested alternatives when a target class is too sparse, naturally co-occurs with the source on val, or has very different box geometry
 
 On COCO val2017, the default backdoor target remains `spoon (44)` for consistency with the existing experiments.

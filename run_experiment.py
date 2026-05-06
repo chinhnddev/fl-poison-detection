@@ -567,6 +567,8 @@ def main():
             "--attacked", cfg["eval"]["attacked_model"],
             "--defended", cfg["eval"]["defended_model"],
             "--device", cfg["train"]["device"],
+            "--map_conf", str(cfg["eval"].get("map_conf", 0.001)),
+            "--asr_conf", str(cfg["eval"].get("asr_conf", cfg["eval"].get("conf", 0.25))),
             "--asr_src_class_id", str(cfg["eval"].get("asr_src_class_id", 0)),
             "--asr_target_class_id", str(cfg["eval"].get("asr_target_class_id", cfg["eval"].get("poisoned_class_id", 16))),
             "--asr_iou", str(cfg["eval"].get("asr_iou", 0.5)),

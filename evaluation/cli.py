@@ -120,7 +120,9 @@ def main():
     ap.add_argument("--defended", default="")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--imgsz", type=int, default=320)
-    ap.add_argument("--conf", type=float, default=0.001)
+    ap.add_argument("--map_conf", type=float, default=0.001)
+    ap.add_argument("--asr_conf", type=float, default=0.25)
+    ap.add_argument("--conf", type=float, default=None, help="Deprecated alias for --asr_conf.")
     ap.add_argument("--asr_src_class_id", type=int, default=-1)
     ap.add_argument("--asr_target_class_id", type=int, default=-1)
     ap.add_argument("--asr_iou", type=float, default=0.5)
@@ -142,6 +144,8 @@ def main():
     ap.add_argument("--perception_class_penalty", type=float, default=0.5)
     args = ap.parse_args()
     args.device = resolve_eval_device(args.device)
+    if args.conf is not None:
+        args.asr_conf = float(args.conf)
     print(f"Using evaluation device: {args.device}")
 
     pair_info = None
@@ -167,7 +171,7 @@ def main():
     for name, mp in [("baseline", args.baseline), ("attacked", args.attacked), ("defended", args.defended)]:
         if not mp:
             continue
-        mm = evaluate_map(mp, args.data, args.imgsz, args.device)
+        mm = evaluate_map(mp, args.data, args.imgsz, args.device, conf=args.map_conf)
         asr = None
         if args.asr_src_class_id >= 0 and args.asr_target_class_id >= 0:
             asr = asr_backdoor_object_level(
@@ -177,7 +181,7 @@ def main():
                 target_class_id=args.asr_target_class_id,
                 imgsz=args.imgsz,
                 device=args.device,
-                conf=args.conf,
+                conf=args.asr_conf,
                 iou_thres=args.asr_iou,
                 trigger=bool(args.asr_trigger),
                 trigger_size=args.trigger_size,
