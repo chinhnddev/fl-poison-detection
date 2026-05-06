@@ -177,11 +177,12 @@ def main():
     host, port = cfg["server"]["host"], cfg["server"]["port"]
     log_dir.mkdir(parents=True, exist_ok=True)
     run_config_path = config_path
-    if args.resume_weights:
+    if args.poison_ratio is not None or args.resume_weights:
         cfg = dict(cfg)
-        cfg["model"] = dict(cfg.get("model") or {})
-        cfg["model"]["initial_weights"] = str(_abs_path(args.resume_weights, repo_root))
-        run_config_path = log_dir / "cfg_resume.yaml"
+        if args.resume_weights:
+            cfg["model"] = dict(cfg.get("model") or {})
+            cfg["model"]["initial_weights"] = str(_abs_path(args.resume_weights, repo_root))
+        run_config_path = log_dir / "cfg_runtime.yaml"
         with open(run_config_path, "w", encoding="utf-8") as f:
             yaml.safe_dump(cfg, f, sort_keys=False)
     print(f"Using dataset={cfg['dataset']['base_data_yaml']} eval_data={cfg['eval']['data_yaml']}")
