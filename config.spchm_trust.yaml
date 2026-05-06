@@ -15,7 +15,7 @@ federated:
   min_available_clients: 10
 
 model:
-  initial_weights: "./artifacts/baseline_coco10/baseline_round_0015.pt"
+  initial_weights: "yolov8n.pt"
   global_out: "./artifacts/spchm_trust.pt"
 
 train:
@@ -159,7 +159,7 @@ eval:
   trigger_value: 255
   trigger_position: "bottom_right"
   round_tracking:
-    enabled: true
+    enabled: false
     data_yaml: "./datasets/coco10/coco10.yaml"
     imgsz: 640
     device: "cuda:0"
