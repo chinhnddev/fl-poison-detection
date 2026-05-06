@@ -130,7 +130,7 @@ def main():
         help="Research experiments use FedAvg; robustness comes from defenses on deltas.",
     )
     ap.add_argument("--rounds", type=int, default=5)
-    ap.add_argument("--start_round", type=int, default=16)
+    ap.add_argument("--start_round", type=int, default=1)
     ap.add_argument("--resume_weights", default="", help="Resume global model from this .pt checkpoint")
     ap.add_argument("--is_attack", action="store_true", help="Force malicious clients to participate from the first round")
     ap.add_argument("--config", default="config.baseline.yaml")
