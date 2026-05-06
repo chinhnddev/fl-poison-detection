@@ -15,7 +15,7 @@ federated:
   min_available_clients: 10
 
 model:
-  initial_weights: "./artifacts/baseline_coco10/baseline_round_0015.pt"
+  initial_weights: "yolov8n.pt"
   global_out: "./artifacts/attack.pt"
 
 train:
