@@ -21,8 +21,8 @@ model:
 train:
   local_epochs: 2
   malicious_local_epochs: 2
-  imgsz: 640
-  batch: 8
+  imgsz: 512
+  batch: 4
   optimizer: AdamW
   lr0: 0.0001
   lrf: 0.01
