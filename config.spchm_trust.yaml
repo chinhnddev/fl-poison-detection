@@ -21,7 +21,7 @@ model:
 train:
   local_epochs: 2
   malicious_local_epochs: 2
-  imgsz: 512
+  imgsz: 640
   batch: 4
   optimizer: AdamW
   lr0: 0.0001
@@ -97,7 +97,7 @@ defense:
   proxy_data_yaml: "./datasets/coco10/proxy/proxy256.yaml"
   proxy_max_images: 256
   proxy_conf: 0.25
-  proxy_imgsz: 512
+  proxy_imgsz: 640
   match_iou_threshold: 0.5
 
   # Optional trigger-aware proxy pass for backdoor-focused experiments.
@@ -115,7 +115,7 @@ defense:
   root_lr: 0.01
   root_batch: 4
   root_num_workers: 0
-  root_imgsz: 512
+  root_imgsz: 640
   root_device: "cuda:0"
 
   # SPCHM-Trust anomaly scoring and normalization.
@@ -146,7 +146,7 @@ runtime:
 eval:
   run_after_experiment: false
   data_yaml: "./datasets/coco10/coco10.yaml"
-  imgsz: 512
+  imgsz: 640
   baseline_model: "./artifacts/baseline.pt"
   attacked_model: "./artifacts/attack.pt"
   defended_model: "./artifacts/spchm_trust.pt"
@@ -163,7 +163,7 @@ eval:
   round_tracking:
     enabled: false
     data_yaml: "./datasets/coco10/coco10.yaml"
-    imgsz: 512
+    imgsz: 640
     device: "cuda:0"
     every_n_rounds: 1
     keep_final: true

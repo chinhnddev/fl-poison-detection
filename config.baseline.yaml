@@ -19,7 +19,7 @@ model:
 
 train:
   local_epochs: 2
-  imgsz: 512
+  imgsz: 640
   batch: 4  # Reduced from 8 for safe Colab execution
   optimizer: AdamW
   lr0: 0.0001

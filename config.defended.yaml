@@ -21,7 +21,7 @@ model:
 train:
   local_epochs: 2
   malicious_local_epochs: 3
-  imgsz: 512
+  imgsz: 640
   batch: 4
   num_workers: 0
   device: "cuda:0"
