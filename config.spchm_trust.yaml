@@ -141,6 +141,7 @@ runtime:
   tmp_dir: "./tmp"
   train_runs_dir: "./runs_fl/spchm_trust"
   seed: 1234
+  save_every_round: true  # Lưu mọi round
 
 eval:
   run_after_experiment: false
