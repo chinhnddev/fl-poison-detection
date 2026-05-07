@@ -94,7 +94,7 @@ defense:
   spchm_trust: true
 
   # Shared clean proxy set used for server-side prediction consistency scoring.
-  proxy_data_yaml: "./datasets/coco10/coco10.yaml"
+  proxy_data_yaml: "./datasets/coco10/proxy/proxy256.yaml"
   proxy_max_images: 256
   proxy_conf: 0.25
   proxy_imgsz: 640
@@ -107,11 +107,12 @@ defense:
   proxy_trigger_size: 40
   proxy_trigger_value: 255
   proxy_trigger_position: "bottom_right"
-  proxy_trigger_mode: "max"
+  proxy_trigger_mode: "mean"
 
-  # Proxy-only mode: skip root-set training and use proxy consistency scoring only.
-  root_data_yaml: ""
-  root_epochs: 0
+  # Root-set anchor: server does a light clean update before trust scoring.
+  root_data_yaml: "./datasets/coco10/proxy/proxy256.yaml"
+  root_epochs: 1
+  root_lr: 0.01
   root_batch: 8
   root_num_workers: 0
   root_imgsz: 640
@@ -120,7 +121,7 @@ defense:
   # SPCHM-Trust anomaly scoring and normalization.
   # Moderate decay keeps the weighting sharper than the default while avoiding
   # overreacting to small-score noise on the COCO val2017 setting.
-  tau: 4.0
+  tau: 1.5
   eps: 1.0e-8
   lambda_box: 1.0
   lambda_cls: 1.0

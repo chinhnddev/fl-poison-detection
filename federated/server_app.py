@@ -119,6 +119,9 @@ def _load_spchm_cfg(cfg: Dict) -> Optional[SPCHMTrustConfig]:
         ]
         if k in train_cfg
     }
+    # Allow a dedicated root-set learning rate override for server-side anchor updates.
+    if "root_lr" in d and d.get("root_lr") is not None:
+        train_overrides["lr0"] = float(d.get("root_lr"))
 
     seed = int((runtime_cfg.get("seed")) or 1234)
     runtime_train_dir = Path(str(runtime_cfg.get("train_runs_dir", "./runs_fl")))
